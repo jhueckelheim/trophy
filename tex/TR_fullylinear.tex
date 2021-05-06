@@ -1,0 +1,123 @@
+\documentclass[12pt]{article}
+\usepackage{graphicx,latexsym}
+\usepackage[margin=1.0in]{geometry}
+%\textwidth=7in\textheight=8.5in \oddsidemargin=0in\evensidemargin=\oddsidemargin \topmargin=-.25in 
+\usepackage[noadjust]{cite}       
+\usepackage{amsmath, listings, hyperref, amsfonts, amssymb, commath, courier, amsthm, array} 
+\usepackage[linesnumbered,ruled,vlined]{algorithm2e} 
+
+\usepackage{algpseudocode}
+\usepackage{pdfpages}
+\usepackage{graphicx}
+\usepackage{chngcntr}
+\usepackage{booktabs}
+\counterwithin{figure}{section}
+\counterwithin{equation}{section}
+
+%\counterwithin{Remark}{section}
+\setcounter{MaxMatrixCols}{20} % Increase Matrix columns to more than 10
+
+% \usepackage{listings} \usepackage{hyperref} \usepackage{amsfonts} \usepackage{amssymb}
+%\usepackage{cite} \usepackage{commath}
+%\usepackage{courier} 
+%\usepackage{amsthm}
+\setlength{\oddsidemargin}{0.25in}
+\setlength{\textwidth}{6in}
+\setlength{\topmargin}{-0.25in}
+\setlength{\textheight}{8in}
+\theoremstyle{definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{conj}{Conjecture}
+\newtheorem{rslt}{Result}
+\newtheorem{claim}{Claim}
+\newtheorem{remark}{Remark}
+\newtheorem{case}{Case}
+\newtheorem{example}{Example}[section]
+\newtheorem{proposition}{Proposition}[section]
+
+\counterwithin{definition}{section}
+
+\newcommand{\Rcd}{\mathbb{R}^{c \times d}}   %real number
+\newcommand{\Rcn}{\mathbb{R}^{c \times n}}   %real number
+\newcommand{\Rc}{\mathbb{R}^{c}} 
+\newcommand{\Rn}{\mathbb{R}^{n}} 
+\newcommand{\Rd}{\mathbb{R}^{d}} 
+\newcommand{\R}{\mathbb{R}} 
+\newcommand{\N}{\mathbb{N}} 
+\newcommand{\B}{\mathbb{B}} 
+\newcommand{\dom}{\operatorname{dom}}
+
+\SetArgSty{textup}
+\begin{document}
+	\author{Anuj Bajaj, Matt Menickelly, Paul Hovland, Jan Hueckelheim, and Sri Hari \\ Krishna  Narayanan}
+	\date{\today}
+
+	\title{Variable precision trust region methods}
+	\maketitle
+	
+      \section{Pseudocode} 
+       
+     	\begin{algorithm}[t!]
+     	
+     	%\algsetup{linenosize=\tiny}
+     	\scriptsize
+     
+     %	\vspace{-70pt}
+     %	\caption{Trust region with dynamic accuracy and full linearity heuristics (TR\_dynamic\_fl)}
+     %	\begin{algorithmic}[1] 
+     		\underline{ \textbf{Input}}: $x_{0} \in \Rn$ (initial point), $\delta_{0}>0$ (initial trust-region radius), $\epsilon>0$ (final gradient accuracy), $N \in \N$ (budget constraint)\\
+     		\underline{\textbf{Initialize}}: $0<\eta_1\leq \eta_2<1$, $0<\gamma_1<1\leq \gamma_2$, $\kappa >0$ (large enough), $\kappa_{\text{low}},\epsilon_{\text{tol}} >0$ (small enough), $B_{0} \in \R^{n \times n}$, $\omega$ $\in$ $\{\omega_{h}=10^{-4}$,$\omega_{s}=10^{-8}$, or $\omega_{d}=0\}$ (initial precision), counter = $0$, max$\_$counter $>0$; \\
+     		\textbf{for} $k =0,1,2,\dots, N$ \textbf{do} \\
+     	     Compute $f_k=f(x_k;\omega)$, $g_k=g(x_k;\omega)$\\
+     	     \underline{ \textbf{Terminate}}: \\
+     	     \If{$\|g_{k}\| \leq \epsilon$}{$\kappa_{\text{low}} =0$,\\
+     	     \If{$\omega=\omega_{d}$}{\textbf{terminate}; \\
+     	     \ElseIf{$\omega=\omega_{s}$}{ Compute $f_k=f(x_k;\omega_{d})$, $g_k=g(x_k;\omega_{d})$}
+             \ElseIf{$\omega=\omega_{h}$}{ Compute $f_k=f(x_k;\omega_{s})$, $g_{k}=g(x_k;\omega_{s})$}}
+     	    }	
+     	    \underline{\textbf{Step calculation}}: Compute $s_{k}$ such that $\|s_{k}\| \leq \delta_{k}$ which sufficiently decreases the model
+     	     \begin{equation*}
+     	      q(x_k,s) = g_{k}^{T}s + \dfrac{1}{2}s^{T}B_{k}s
+     	     	\end{equation*}
+     	     	where $g_{k} \approx \nabla f_{k}$, and $B_k$ is an L-SR1 approximation to $\nabla^{2}f_{k}$.\\
+     	    \underline{\textbf{Evaluate the function}}: Compute $\tilde{f}_{k}= f(x_{k}+s_{k};\omega), \tilde{g}_{k}= g(x_{k}+s_{k};\omega)$ \\
+     	    \underline{\textbf{Acceptance of trial point}}: Define 
+     	    \begin{equation*}
+     	    \rho_{k} = \dfrac{f_{k} -\tilde{f}_{k}}{q(x_k,0)-q(x_k,s_{k})} = \dfrac{f_{k}- \tilde{f}_{k}}{-q(x_k,s_{k})} .
+     	    \end{equation*}
+           (Failure) \If{$\rho_{k} < \eta_1$ \text{or} $q(x_k,s_{k})>0$}{ $x_{k+1}=x_{k}$ \\
+           \If{$\omega =\omega_{h} $ (= $\omega_{s}$ resp.)}{counter = counter+1; \\
+            \If{counter=max\_counter}{ counter = 0; $\tilde{\omega} = \omega_{s}$ (= $\omega_{d}$ resp.)\\
+            Compute $f(x_{k}+s_{k};\tilde{\omega}),g(x_{k}+s_{k};\tilde{\omega})$
+            \\
+             \If{$|f(x_{k}+s_{k};\tilde{\omega}) - (f_{k}+q(x_k,s_{k}))| > \kappa \delta_{k}^{2}$}{$f_{k} = f(x_k;\tilde{\omega}), g_{k} = g(x_k;\tilde{\omega})$, and $\tilde{g}_{k} = g(x_k+s_k;\tilde{\omega})$\\
+               \textbf{else} \\
+             $\delta_{k+1} = \gamma_{1}\delta_{k}$}
+             
+              \If{$\tilde{\omega} = \omega_{d}$ and $|f(x_{k}+s_{k};\tilde{\omega}) - (f(x_k;\omega)+q(x_k,s_{k}))| < \kappa_{\text{low}} \delta_{k}^{2}$}{$f_{k} = f(x_k;\omega_{h}), g_{k} = g(x_k;\omega_{h})$, $\tilde{g}_{k} = g(x_k+s_k;\tilde{\omega} )$}
+            \textbf{else} \\
+             $\delta_{k+1} = \gamma_{1}\delta_{k}$
+               }
+           }
+        \If{$\omega =\omega_{d}$}{ $ \delta_{k+1} = \gamma_{1}\delta_{k}$}
+        }
+    
+       (Success) \If{$\rho_{k} > \eta_1$ \text{or} $q(x_k,s_{k})<0$}{
+                          $x_{k+1} = x_{k}+s_{k}$\\
+      \If{$|f_{k} +q(x_k,s_{k} -\tilde{f}_{k})| < \kappa_{\text{low}} \delta_{k}^{2}$}{
+         \If{$\omega =\omega_{d} $ (= $\omega_{s}$ resp.)}{
+         $f_{k}=f(x_{k+1};\omega_{s})$ (=$f(x_{k+1};\omega_{h})$ resp.),
+          $g_{k}=g(x_{k+1};\omega_{s})$ (=$g(x_{k+1};\omega_{h})$ resp.)} 
+        }
+      \If{$|f(x_k;\omega) +q(x_k,s_{k} -f(x_{k}+s_{k};\omega) )| > \kappa_{\text{low}} \delta_{k}^{2}$}{ 
+      $f_{k}=f(x_{k+1};\omega), g_{k}=g(x_{k+1};\omega)$}
+      }
+  	\underline{\textbf{Radius update (Expand)}}: \\
+  	\If{$\rho_{k} \geq \eta_{2}$ and $\|s_{k}\|\geq 0.8\delta_{k}$}{$\delta_{k+1}=\gamma_{2}\delta_{k}$}
+  	\underline{\textbf{No Progress}}: \\
+  		\If{$\delta_{k} \leq \epsilon_{\text{tol}}$}{break;}
+     \end{algorithm}
+
+\end{document} 
