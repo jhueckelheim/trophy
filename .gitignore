@@ -1,6 +1,5 @@
 *.table
 *.idx
-*.nc
 *.csv
 *.pyc
 *__pycache__*
