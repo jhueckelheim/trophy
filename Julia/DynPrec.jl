@@ -5,7 +5,13 @@ using TRS, LinearAlgebra
 export DynTR
 
 function DynTR(x0::Array{Float64,1},handle,prec_vec::Array{Int64,1},epsilon::Float64,budget::Int64)
-
+    #=
+    x0: initialization
+    handle: function name to use in pycutest
+    prec_vec: different precisions desired
+    epsilpn: tolerance to solve to
+    budget: max its
+    =#
     # Later: Check that prec_vec is listed in ascending order
     num_prec = length(prec_vec)
     prec_lvl = 1
@@ -24,7 +30,7 @@ function DynTR(x0::Array{Float64,1},handle,prec_vec::Array{Int64,1},epsilon::Flo
 
     # First function evaluation:
     println("Function evaluations at precision level ", prec, " bits:")
-    f,g = handle(x,prec)
+    f,g = handle(x,prec)    # handle has already accepted problem to be optimized and will return fun grad pair
 
     # Initial TR radius - max_delta, delta could be exposed as an initial parameter
     max_delta = 1e3
@@ -92,6 +98,7 @@ function DynTR(x0::Array{Float64,1},handle,prec_vec::Array{Int64,1},epsilon::Flo
 
         # evaluate function at current precision at new trial point
         fplus,gplus = handle(x+s,prec)
+
         # hard-coded benchmarking:
         if prec_lvl == 1
             prec_str = string(prec_str, "s")
@@ -192,6 +199,9 @@ function DynTR(x0::Array{Float64,1},handle,prec_vec::Array{Int64,1},epsilon::Flo
                     delta = gamma_dec*delta
                 end
             end
+
+
+
         else # the step is at least good
             if first_success == 0
                 first_success = 1
@@ -206,6 +216,11 @@ function DynTR(x0::Array{Float64,1},handle,prec_vec::Array{Int64,1},epsilon::Flo
                 delta = norm(s)
             end
         end
+
+
+
+
+
 
         if first_success == 1
             y0 = gplus-gprev
@@ -247,6 +262,17 @@ function DynTR(x0::Array{Float64,1},handle,prec_vec::Array{Int64,1},epsilon::Flo
     end # end main for loop
     return prechist, xhist
 end # end DynTR
+
+
+
+
+
+
+
+
+
+
+
 
 function update_hessian(H::Matrix,B0::Matrix,Y::Array,S::Array,gplus::Array,gprev::Array,s::Array,memory::Integer,sr1_tol::Float64)
     y = gplus-gprev

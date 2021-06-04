@@ -11,7 +11,9 @@ eps = 1.0e-6
 budget = 100
 
 #prob_str = "ARGTRIGLS"
-prob_str = "ARWHEAD"
+#prob_str = "ARWHEAD"
+prob_str = "DEVGLA1"
+
 p = pycutest.import_problem(prob_str)
 
 print(prob_str, " function in %gD" % p.n)
@@ -31,19 +33,7 @@ xsol = FixedPrec.TR_fixed(x0, fun, 1, 1, eps, budget)
 
 
 print(xsol)
-"""
-while iters < 100 and np.linalg.norm(g) > 1e-10:
-    print("Iteration %g: objective value is %g with norm of gradient %g at x = %s" % (iters, f, np.linalg.norm(g), str(x)))
 
-
-    s = np.linalg.solve(H, -g)  # Newton step
-    x = x + s  # used fixed step length
-    f, g = p.obj(x, gradient=True)
-
-
-    H = p.hess(x)
-    iters += 1
-"""
 
 #print("Found minimum x = %s after %g iterations" % (str(xsol), iters))
 print("Done")

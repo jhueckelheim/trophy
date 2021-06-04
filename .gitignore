@@ -1,3 +1,11 @@
+*.table
+*.idx
+*.nc
+*.csv
+*.pyc
+*__pycache__*
+*.zip
+
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof

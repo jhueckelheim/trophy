@@ -6,13 +6,13 @@ H = NaN*ones(4*550,100,3);
 N = NaN*ones(100,1); 
 
 index = 0;
-for prob = 1:103
+for prob = 1:103   % loop through problems
     if prob ~= 14 && prob ~= 82 && prob ~= 85
         index = index + 1;
         
         % double
         probdata = strcat('dprob',num2str(prob),'.mat');
-        load(probdata)
+        load(probdata)      % construct string and load problem data
         fprobdata = strcat('f',probdata);
         load(fprobdata)
         num_evals = length(fvals); 

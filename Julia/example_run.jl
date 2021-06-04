@@ -1,6 +1,6 @@
 using Pkg
 
-Pkg.add("TRS")
+Pkg.add(path="/Users/clancy/TRS")
 
 include("./DynPrec.jl")
 include("./functions/FunctionWrapper.jl")
@@ -9,7 +9,7 @@ include("./functions/FunctionWrapper.jl")
 # - you need to do whatever you need to do to give this
 # environment variable to Julia
 
-ENV["PREDUCER"] = "/Users/mattmenickelly/preducer"
+ENV["PREDUCER"] = "/Users/clancy/repos/preducer" #/Users/mattmenickelly/preducer
 
 global PROBLEM = "ROSENBR"
 
@@ -25,13 +25,13 @@ function handle(x,prec)
     return f,g
 end
 
-nlp = CUTEstModel(PROBLEM)
-x0 = nlp.meta.x0
-finalize(nlp)
+nlp = CUTEstModel(PROBLEM)      # this takes in a problem string and gets info t
+x0 = nlp.meta.x0                # initializion
+finalize(nlp)                   # kill problem already?
 
-prec_vec = [32;64]
-epsilon = 1e-8
-budget = 100
+prec_vec = [32;64]      # set different precision levels.
+epsilon = 1e-8          # set tolerance
+budget = 100            # number of iterations to do
 
 x,f = DynPrec.DynTR(x0,handle,prec_vec,epsilon,budget)
 println(x)

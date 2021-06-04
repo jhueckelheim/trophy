@@ -380,3 +380,7 @@ def CG_Steinhaug_matFree(epsTR, g , deltak, S, Y):
         rOld = rNew
     return pk
 
+
+
+
+
