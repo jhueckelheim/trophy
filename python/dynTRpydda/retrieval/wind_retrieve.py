@@ -187,7 +187,13 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
                       filter_window=9, filter_order=3, min_bca=30.0,
                       max_bca=150.0, upper_bc=True, model_fields=None,
                       output_cost_functions=True, roi=1000.0,
-                      max_memory=10, use_dynTR=True, store_history=False, gtol=1e-6):
+                      max_memory=10, use_dynTR=True, store_history=False, gtol=1e-6,
+                      precision_vector=None, subproblem_tol=1e-6,
+                      write_folder=None):
+    if store_history:
+        if write_folder is None:
+            write_folder = os.getcwd()
+        print('\n \nWriting to ' + write_folder + '\n \n')
     """
     This function takes in a list of Py-ART Grid objects and derives a
     wind field. Every Py-ART Grid in Grids must have the same grid
@@ -543,8 +549,10 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
     parameters.print_out = False
 
     fun = lambda z, prec: obj_fun(z, prec, parameters)
-    prec_vec = [1, 2]
-
+    if precision_vector is not None:
+        prec_vec = precision_vector
+    else:
+        prec_vec = [1, 2]
 
     t0 = time.time()
     temp = list()
@@ -555,12 +563,21 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
         delta_init = max(delta_init, 50)
         print('Using gtol:', gtol, 'Memory:', max_memory)
         ret = DynPrec.DynTR_for_pydda(winds, fun, prec_vec, gtol=gtol, max_iter=max_iterations, verbose=True,
-                                      max_memory=max_memory, delta_init=delta_init, store_history=True)
+                                      max_memory=max_memory, delta_init=delta_init, store_history=True,
+                                      tr_tol=subproblem_tol)
         t_elapsed = time.time() - t0
         # the following allows us to go between stucture type to tuple type returned by fmin_l_bfgs_b
         winds = tuple((ret.x, ret.fun))
-        temp.append([ret.success, t_elapsed, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
-                     ret.nit, ret.nfev, ret.precision_counts[0], ret.message])
+        if len(prec_vec) > 1:
+            temp.append([ret.success, t_elapsed-ret.textra, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
+                         ret.nit, ret.nfev, ret.precision_counts[0], ret.message])
+        else:
+            temp.append([ret.success, t_elapsed, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
+                         ret.nit, ret.nfev, ret.precision_counts[0], ret.message])
+
+        if len(precision_vector) > 1:
+            df_single = pd.DataFrame(data = ret.single_array, columns=['fun', 'two_norm_grad', 'inf_norm_grad'])
+            df_double = pd.DataFrame(data = ret.double_array, columns=['fun', 'two_norm_grad', 'inf_norm_grad'])
 
     else:
         winds = fmin_l_bfgs_b(J_function, winds, args=(parameters,), m=max_memory, maxiter=max_iterations,
@@ -574,34 +591,42 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
                      d['nit'], d['funcalls'], 0, d['task']])
 
 
+    print("Done! Time = " + "{:2.1f}".format(time.time() - bt))
+    try:
+        print("Adjusted time = " + "{:2.1f}".format(time.time() - bt - ret.textra))
+    except:
+        bt = bt
+
+
     ### WRITE RESULTS TO FILE IF STORE_HISTORY IS TRUE###
     if store_history:
+        print('Writing files to ' + write_folder)
         fields = ['success', 'time', 'feval', 'grad2norm',
                   'grad_inf_norm', 'nits', 'fevals', 'single_evals','message']
 
-        if use_dynTR:
-            folder_name = 'dyntr_gtol'+str(gtol)+'_memory' + str(max_memory)
-        else:
-            folder_name = 'lbfgs_gtol'+str(gtol)+'_memory' + str(max_memory)
-
-        cmd = 'mkdir data/'+ folder_name
-        os.system(cmd)
 
         df_general = pd.DataFrame(data=temp, columns=fields)
-        df_general.to_csv('data/'+folder_name+'/summary.csv')
+        df_general.to_csv(write_folder + '/summary.csv', index=False)
+
 
         if use_dynTR:
             histories = np.column_stack((ret.prec_hist, ret.f_hist, ret.g_two_norm_hist, ret.g_inf_norm_hist))
             df_func_grad_hist = pd.DataFrame(data=histories, columns=['precision', 'f_val', 'g_two_norm', 'g_inf_norm'])
-            df_func_grad_hist.to_csv('data/'+folder_name+'/func_grad_hist.csv')
+            df_func_grad_hist.to_csv(write_folder + 'func_grad_hist.csv')
+            if len(precision_vector) > 1:
+                df_single.to_csv(write_folder + 'single_history.csv')
+                df_double.to_csv(write_folder + 'double_history.csv')
+                df_time = pd.DataFrame(data=[ret.textra], columns=['time_for_benchmarking'])
+                df_time.to_csv(write_folder + 'extra_time.csv')
 
             x_and_grad = np.column_stack((ret.x, ret.jac))
+
         else:
             gtemp = grad_J(winds[0], parameters)
             x_and_grad = np.column_stack((winds[0], gtemp))
 
         df_x_and_grad = pd.DataFrame(data=x_and_grad, columns=['winds', 'gradient'])
-        df_x_and_grad.to_csv('data/'+folder_name+'/winds_and_gradient.csv')
+        df_x_and_grad.to_csv(write_folder + 'winds_and_gradient.csv')
 
     parameters.print_out = True
     if output_cost_functions is True:
@@ -669,7 +694,7 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
             winds = np.stack([winds[0], winds[1], winds[2]])
             winds = winds.flatten()
 
-    print("Done! Time = " + "{:2.1f}".format(time.time() - bt))
+
     give_time = os.system('date')
     # First pass - no filter
     the_winds = np.reshape(

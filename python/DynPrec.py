@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax.numpy.linalg import norm as jnorm
 from numpy.linalg import norm
 import util_func_v2
-
+import time
 
 def DynTR(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memory=30, store_history=False,
           hessian_updates='sr1', tr_tol=1.e-5, delta_init=None, max_delta=1e4, sr1_tol=1.e-4):
@@ -232,7 +232,7 @@ def DynTR(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memo
 
 
 def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memory=30, store_history=False,
-          hessian_updates='sr1', tr_tol=None, delta_init=None, max_delta=1e4, sr1_tol=1.e-4):
+          hessian_updates='sr1', tr_tol=1e-6, delta_init=None, max_delta=1e4, sr1_tol=1.e-4):
     """
     :param x0: numpy array, initialization
     :param fun:  objective/gradient function
@@ -250,9 +250,9 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
     # Later: Check that prec_vec is listed in ascending order
 
     # set highest level of precision and counters to zero
-    if tr_tol is None:
-        tr_tol = gtol/10
-
+    #if tr_tol is None:
+    #    tr_tol = gtol/10
+    nprec = len(prec_vec)
     num_prec = max(prec_vec)
     prec_lvl = 0
     prec = prec_vec[prec_lvl]
@@ -261,6 +261,9 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
     prec_hist = list()
     inf_norm_hist = list()
     two_norm_hist = list()
+    single_array = list()
+    double_array = list()
+    textra = 0
 
     # Set the initial iterate
     x = x0
@@ -280,7 +283,7 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
         f_hist.append(f)
         prec_hist.append(prec_lvl)
         inf_norm_hist.append(norm(g, np.inf))
-        two_norm_hist.append(norm(g, np.inf))
+        two_norm_hist.append(norm(g))
 
 
 
@@ -334,7 +337,7 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
 
 
         if hessian_updates == 'sr1':
-            s, crit = util_func_v2.CG_Steinhaug_matFree(tr_tol, g, delta, S, Y, gamma, verbose=False)
+            s, crit = util_func_v2.CG_Steinhaug_matFree(tr_tol, g, delta, S, Y, gamma, verbose=False, max_it=10*max_memory)
             predicted_reduction = np.sum(-0.5*(np.matmul(s.T,util_func_v2.Hessian_times_vec(Y,S,gamma,s))) - np.dot(s.T,g))  # this should be greater than zero
         elif hessian_updates == 'lbfgs':
             s, crit = util_func_v2.BFGS_CG_Steinhaug_matFree(tr_tol, g.reshape((n,1)), delta, S, Y, gamma)
@@ -392,7 +395,7 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                 temp_prec = prec_vec[prec_lvl + 1]
                 if verbose: print("Probed a pair of function evaluations at ", temp_prec, " bits...")
                 ftemp, gtemp = fun(x,temp_prec)
-                ftempplus,gtempplus = fun(x+s,temp_prec)
+                ftempplus, gtempplus = fun(x+s, temp_prec)
                 prec_lvl_counter[prec_lvl+1] += 2
 
                 theta = abs((f-fplus)-(ftemp-ftempplus))
@@ -402,7 +405,6 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                     print("Permanently switching to precision level ", temp_prec, " bits:")
                     f = ftemp
                     g = gtemp
-                    fplus = ftempplus
                     gplus = gtempplus
                     gprev = gtemp
                     delta = min(1.0, norm(g))
@@ -421,8 +423,26 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
             if store_history:
                 f_hist.append(np.ndarray.item(np.array(f)))
                 prec_hist.append(prec_lvl)
-                inf_norm_hist.append(norm(g, np.inf))
-                two_norm_hist.append(norm(g))
+                norm_g_inf = norm(g, np.inf)
+                norm_g_two = norm(g)
+                inf_norm_hist.append(norm_g_inf)
+                two_norm_hist.append(norm_g_two)
+
+                if nprec > 1:
+                    t1 = time.time()
+                    # is the current evaluation a single?
+                    if prec_lvl == 0:
+                        # if so, calculate double function and grad and append
+                        fd, gd = fun(xnew, 2)
+                        single_array.append([np.ndarray.item(np.array(f)), norm_g_two, norm_g_inf])
+                        double_array.append([fd, norm(gd), norm(gd, np.inf)])
+                    if prec_lvl == 1:
+                        fs, gs = fun(xnew, 1)
+                        single_array.append([fs, norm(gs), norm(gs, np.inf)])
+                        double_array.append([np.ndarray.item(np.array(f)), norm_g_two, norm_g_inf])
+                    t2 = time.time()
+                    textra += (t2-t1)
+
 
             # is the step great (do we get desired reduction from model and are we close to TR radius)?
             if (norm(s) > 0.8*delta) and (rho > eta_great):
@@ -442,10 +462,8 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
 
         # update the Hessian
         if first_success > 0:
-            if hessian_updates == 'sr1':
-                Y, S = util_func_v2.updateYS(Y, S, y, s, memory, gamma, sr1_tol=sr1_tol)
-            elif hessian_updates == 'lbfgs':
-                Y, S = util_func_v2.BFGS_updateYS(Y, S, y, s, memory, gamma, sr1_tol=sr1_tol)
+            Y, S = util_func_v2.updateYS(Y, S, y, s, memory, gamma, sr1_tol=sr1_tol)
+
 
         # get ready for next iteration
         x = xnew
@@ -481,6 +499,10 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
         ret.prec_hist = np.array(prec_hist)
         ret.g_inf_norm_hist = np.array(inf_norm_hist)
         ret.g_two_norm_hist = np.array(two_norm_hist)
+        if nprec > 1:
+            ret.single_array = np.array(single_array)
+            ret.double_array = np.array(double_array)
+            ret.textra = textra
 
     return ret
 

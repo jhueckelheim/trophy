@@ -96,7 +96,7 @@ def updateYS(Y, S, y, s, memory, gamma, sr1_tol = 1e-4, verbose=False):
             if S.shape[1] > 0:
                 Psi = Y - gamma*S
                 Minv = np.matmul(S.T, Y) - gamma*np.matmul(S.T, S)
-                tmp = np.min(LA.eig( np.matmul(Psi.T, Psi) )[0])
+                tmp = np.min(LA.eig(np.matmul(Psi.T, Psi))[0])
                 if tmp > 0 and LA.det(Minv) != 0:
                     keep_going = False
                 else:
@@ -150,8 +150,12 @@ def Hessian_times_vec(Y, S, gamma, v):
     return B_v
 
 
-def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
+def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False, max_it=None):
+
     nv = len(g)
+    if max_it is None:
+        max_it = 3*nv
+
     zOld = np.zeros((nv, 1))
     try:
         g.shape[1]
@@ -165,23 +169,8 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
         p = zOld
         return p, "small residual"
 
-
     # use compact limited form to generate
     if not isinstance(Y, list):
-        '''
-        L = np.zeros((Y.shape[1], Y.shape[1]))
-        R = np.zeros((Y.shape[1], Y.shape[1]))
-        sig = np.zeros(L.shape[0])
-        r = np.zeros(L.shape[0])
-        for ii in range(Y.shape[1]):
-            sig[ii] = np.dot(S[:, ii], Y[:, ii])
-            r[ii] = np.dot(S[:, ii], S[:, ii])
-            for jj in range(0, ii):
-                L[ii, jj] = np.dot(S[:, ii], Y[:, jj])
-                R[ii, jj] = np.dot(S[:, ii], S[:, jj])
-
-        M = np.diag(sig) + L + L.T  - gamma*(np.diag(r) + R + R.T)   #np.dot(S.T, S)
-        '''
         temp1 = np.matmul(S.T, Y)
         M = np.tril(temp1) + np.triu(temp1.T, 1) - gamma*np.matmul(S.T, S)
         try:
@@ -213,14 +202,15 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
             # this is where problems occur. Check to see if there is a descent along this particular direction
             # note that g'*p + 0.5*p'*B*p should be negative.
             if dbug:
-                temp1 = (Y-gamma*S).T@p
-                temp2 = Minv@temp1
-                B_p = (Y-gamma*S)@temp2 + gamma*p
-                model_change = g.T@p + 0.5*p.T@B_p
+                temp1 = np.matmul(G_T, p)
+                temp2 = np.matmul(Minv, temp1)
+                B_p = (G)@temp2 + gamma*p
+                B_p = np.matmul(G, temp2) + gamma*p
+                model_change = np.dot(g.T, p) + 0.5*np.dot(p.T, B_p)
                 if model_change > 0:
                     # form approximate Hessian to probe eigenvalues, etc
                     if True:
-                        B = (Y-gamma*S)@(Minv@(Y-gamma*S).T) + gamma*np.eye(nv)
+                        B = np.matmul(G,np.matmul(Minv,G_T)) + gamma*np.eye(nv)
                         model_func = lambda z: g.T@z + 0.5*z.T@B@z
                         print("Model increase of", model_change[0][0],  ", recent gradient is", norm(rOld), "and cond(B)=",LA.cond(B))
                         ev, E = LA.eig(B)
@@ -234,9 +224,9 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
                     while tauk > tau_tol:
                         pk = zOld + tauk*dOld
 
-                        temp1 = ((Y-gamma*S).T)@pk
+                        temp1 = G.T@pk
                         temp2 = Minv@temp1
-                        B_pk = (Y-gamma*S)@temp2 + gamma*pk
+                        B_pk = G@temp2 + gamma*pk
                         model_change = model_func(pk)
                         model_change = g.T@pk + 0.5*pk.T@B_pk
 
@@ -251,7 +241,6 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
 
             if dBd == 0:
                 print("The matrix is indefinite") if verbose else None
-
             return p, "neg. curve",
 
         alphaj = norm(rOld)**2 / dBd
@@ -262,10 +251,10 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
             return p, "exceed TR"
 
         rNew = rOld + alphaj*B_dOld
-        if norm(rNew) <= eps or j > 3*nv:  # or norm(zNew - zOld) <= eps
+        if norm(rNew) <= eps or j > max_it:  # or norm(zNew - zOld) <= eps
             p = zNew
             if norm(rNew) > eps:
-                if verbose: print('CG should have converged by now')
+                print('CG should have converged by now') if verbose else None
                 return p, "Too many CG iterations"
             else:
                 return p, "Success in TR"
