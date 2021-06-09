@@ -6,6 +6,7 @@ from jax.numpy.linalg import norm as jnorm
 from numpy.linalg import norm
 import util_func_v2
 import time
+import pandas as pd
 
 def DynTR(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memory=30, store_history=False,
           hessian_updates='sr1', tr_tol=1.e-5, delta_init=None, max_delta=1e4, sr1_tol=1.e-4):
@@ -232,7 +233,7 @@ def DynTR(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memo
 
 
 def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memory=30, store_history=False,
-          hessian_updates='sr1', tr_tol=1e-6, delta_init=None, max_delta=1e4, sr1_tol=1.e-4):
+          hessian_updates='sr1', tr_tol=1e-6, delta_init=None, max_delta=1e4, sr1_tol=1.e-4, write_folder=None):
     """
     :param x0: numpy array, initialization
     :param fun:  objective/gradient function
@@ -263,7 +264,10 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
     two_norm_hist = list()
     single_array = list()
     double_array = list()
+    step_size_hist = list()
+    delta_hist = list()
     textra = 0
+
 
     # Set the initial iterate
     x = x0
@@ -326,7 +330,11 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                     prec_hist.append(prec_lvl)
                     inf_norm_hist.append(norm(g, np.inf))
                     two_norm_hist.append(norm(g))
-
+                    if write_folder is not None:
+                        # this will write single at switch point over to
+                        temp = pd.DataFrame(data=np.column_stack((x,g)), columns=['winds','gradient'])
+                        temp.to_csv(write_folder + 'winds_and_gradient_at_switch.csv')
+                        singles_at_switch = i
 
                 prec_lvl_counter[prec_lvl] += 1
                 if norm(g) <= gtol or norm(g, np.inf) <= gtol:
@@ -425,8 +433,10 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                 prec_hist.append(prec_lvl)
                 norm_g_inf = norm(g, np.inf)
                 norm_g_two = norm(g)
+                s_norm = norm(s)
                 inf_norm_hist.append(norm_g_inf)
                 two_norm_hist.append(norm_g_two)
+                step_size_hist.append(s_norm)
 
                 if nprec > 1:
                     t1 = time.time()
@@ -434,15 +444,16 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                     if prec_lvl == 0:
                         # if so, calculate double function and grad and append
                         fd, gd = fun(xnew, 2)
-                        single_array.append([np.ndarray.item(np.array(f)), norm_g_two, norm_g_inf])
+                        single_array.append([np.ndarray.item(np.array(f)), norm_g_two, norm_g_inf, s_norm, delta])
                         double_array.append([fd, norm(gd), norm(gd, np.inf)])
                     if prec_lvl == 1:
                         fs, gs = fun(xnew, 1)
-                        single_array.append([fs, norm(gs), norm(gs, np.inf)])
+                        single_array.append([fs, norm(gs), norm(gs, np.inf), s_norm, delta])
                         double_array.append([np.ndarray.item(np.array(f)), norm_g_two, norm_g_inf])
                     t2 = time.time()
                     textra += (t2-t1)
-
+                else:
+                    single_array.append([np.ndarray.item(np.array(f)), norm_g_two, norm_g_inf, s_norm, delta])
 
             # is the step great (do we get desired reduction from model and are we close to TR radius)?
             if (norm(s) > 0.8*delta) and (rho > eta_great):
@@ -499,10 +510,11 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
         ret.prec_hist = np.array(prec_hist)
         ret.g_inf_norm_hist = np.array(inf_norm_hist)
         ret.g_two_norm_hist = np.array(two_norm_hist)
+        ret.single_array = np.array(single_array)
         if nprec > 1:
-            ret.single_array = np.array(single_array)
             ret.double_array = np.array(double_array)
             ret.textra = textra
+            ret.singles_at_switch = singles_at_switch
 
     return ret
 

@@ -556,15 +556,16 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
 
     t0 = time.time()
     temp = list()
-    ####### TESTING TRUST REGION SOLVER WITH JAX FUNCTIONS
 
+
+    ####### TESTING TRUST REGION SOLVER WITH JAX FUNCTIONS
     if use_dynTR:
         delta_init = norm(grad_J(winds, parameters))
         delta_init = max(delta_init, 50)
         print('Using gtol:', gtol, 'Memory:', max_memory)
         ret = DynPrec.DynTR_for_pydda(winds, fun, prec_vec, gtol=gtol, max_iter=max_iterations, verbose=True,
                                       max_memory=max_memory, delta_init=delta_init, store_history=True,
-                                      tr_tol=subproblem_tol)
+                                      tr_tol=subproblem_tol, write_folder=write_folder)
         t_elapsed = time.time() - t0
         # the following allows us to go between stucture type to tuple type returned by fmin_l_bfgs_b
         winds = tuple((ret.x, ret.fun))
@@ -572,11 +573,15 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
             temp.append([ret.success, t_elapsed-ret.textra, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
                          ret.nit, ret.nfev, ret.precision_counts[0], ret.message])
         else:
-            temp.append([ret.success, t_elapsed, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
-                         ret.nit, ret.nfev, ret.precision_counts[0], ret.message])
+            if prec_vec == [1]:
+                temp.append([ret.success, t_elapsed, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
+                            ret.nit, ret.nfev, ret.precision_counts[0], ret.message])
+            else:
+                temp.append([ret.success, t_elapsed, ret.fun, norm(ret.jac), norm(ret.jac, np.inf),
+                         ret.nit, ret.nfev, 0, ret.message])
 
+        df_single = pd.DataFrame(data = ret.single_array, columns=['fun', 'two_norm_grad', 'inf_norm_grad', 'step_size', 'delta'])
         if len(precision_vector) > 1:
-            df_single = pd.DataFrame(data = ret.single_array, columns=['fun', 'two_norm_grad', 'inf_norm_grad'])
             df_double = pd.DataFrame(data = ret.double_array, columns=['fun', 'two_norm_grad', 'inf_norm_grad'])
 
     else:
@@ -611,10 +616,12 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
 
         if use_dynTR:
             histories = np.column_stack((ret.prec_hist, ret.f_hist, ret.g_two_norm_hist, ret.g_inf_norm_hist))
-            df_func_grad_hist = pd.DataFrame(data=histories, columns=['precision', 'f_val', 'g_two_norm', 'g_inf_norm'])
+            df_func_grad_hist = pd.DataFrame(data=histories, columns=['precision', 'f_val', 'g_two_norm',
+                                                                      'g_inf_norm'])
             df_func_grad_hist.to_csv(write_folder + 'func_grad_hist.csv')
+            df_single.to_csv(write_folder + 'single_history.csv')
             if len(precision_vector) > 1:
-                df_single.to_csv(write_folder + 'single_history.csv')
+                #df_single.to_csv(write_folder + 'single_history.csv')
                 df_double.to_csv(write_folder + 'double_history.csv')
                 df_time = pd.DataFrame(data=[ret.textra], columns=['time_for_benchmarking'])
                 df_time.to_csv(write_folder + 'extra_time.csv')
