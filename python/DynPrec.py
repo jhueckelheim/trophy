@@ -277,6 +277,8 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
     # Internal algorithmic parameters: Should expose through a struct Type
     eta_good = 0.01
     eta_great = 0.1
+    #eta_good = 0.2
+    #eta_great = 0.8
     gamma_dec = 0.5
     gamma_inc = 2
 
@@ -291,7 +293,7 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
 
 
 
-
+    singles_at_switch = None
     # Initial TR radius - max_delta, delta could be exposed as an initial parameter
     delta = norm(g) if delta_init is None else delta_init
     max_delta = max(max_delta, norm(g))
@@ -343,16 +345,8 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                     success = True
                     print(message) if verbose else None
 
-
-        if hessian_updates == 'sr1':
-            s, crit = util_func_v2.CG_Steinhaug_matFree(tr_tol, g, delta, S, Y, gamma, verbose=False, max_it=10*max_memory)
-            predicted_reduction = np.sum(-0.5*(np.matmul(s.T,util_func_v2.Hessian_times_vec(Y,S,gamma,s))) - np.dot(s.T,g))  # this should be greater than zero
-        elif hessian_updates == 'lbfgs':
-            s, crit = util_func_v2.BFGS_CG_Steinhaug_matFree(tr_tol, g.reshape((n,1)), delta, S, Y, gamma)
-            predicted_reduction = np.sum(-0.5*np.matmul(s.T, util_func_v2.BFGS_hessian_times_vec(Y,S,gamma,s)) - np.dot(s.T@g))  # this should be greater than zerosum(-0.5)
-        else:
-            print('Update not recognized')
-            break
+        s, crit = util_func_v2.CG_Steinhaug_matFree(tr_tol, g, delta, S, Y, gamma, verbose=False, max_it=10*max_memory)
+        predicted_reduction = np.sum(-0.5*(np.matmul(s.T,util_func_v2.Hessian_times_vec(Y,S,gamma,s))) - np.dot(s.T,g))  # this should be greater than zero
 
         s = s.reshape((n,))
         if predicted_reduction <= 0:
@@ -360,7 +354,7 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                 # I think this is the result of having the same exact subproblem after update since we have
                 # two versions of same function for different precisions.
                 print('No predicted reduction') if verbose else None
-                predicted_reduction = np.inf
+                predicted_reduction = np.inf  # this can cause problems down stream for theta
             else:
                 print('Step gives model function increase of', -predicted_reduction) if verbose else None
 
@@ -394,8 +388,10 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
 
                     # initial theta (how different are evals at different precision, if big, increase precision)
                     theta = abs((f-fplus)-(ftemp-ftempplus))
-                    if np.isnan(theta):
+                    print('Initial theta is ', theta)
+                    if np.isnan(theta) or np.isinf(theta):
                         theta = np.sqrt(machine_eps)
+                        print('Since that is a problem, theta has been changed to', theta)
 
 
             # reason for else is that if we don't have this, we will need to evaluate again, not sure that's a big concern
@@ -406,7 +402,10 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                 ftempplus, gtempplus = fun(x+s, temp_prec)
                 prec_lvl_counter[prec_lvl+1] += 2
 
+                # might need to change this to ensure decrease in f and ftemp
                 theta = abs((f-fplus)-(ftemp-ftempplus))
+                print('Changing theta to', theta) if verbose else None
+
                 if theta > eta_good*predicted_reduction:
                     prec_lvl += 1
                     prec = prec_vec[prec_lvl]
@@ -463,12 +462,6 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
 
         y = gplus-gprev
         if first_success == 1:
-            #constant = (y0'*s)/(y0'*y0)    # originally in code. I believe this is for inverse hessian
-            #constant = 1.0
-
-            # following choice is based on B_0 for initial approximate Hessian as discussed on pp. 178 and 182 N&W
-            #gamma = norm(y)**2/(y.T@s)    # reciprocals of one another, which is more appropriate for approx Hessian?
-
             first_success = 2
 
         # update the Hessian
@@ -478,7 +471,6 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
 
         # get ready for next iteration
         x = xnew
-        #x_hist.append(x) if store_history else None
 
         # TODO: write better output to command line indicating progress
         if verbose:
@@ -499,6 +491,7 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
                 break
 
 
+
     if i == (max_iter-1):
         message = "Exceed max iterations"
         success = False
@@ -514,6 +507,9 @@ def DynTR_for_pydda(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False
         if nprec > 1:
             ret.double_array = np.array(double_array)
             ret.textra = textra
+            if singles_at_switch is None:
+                singles_at_switch = i
+
             ret.singles_at_switch = singles_at_switch
 
     return ret

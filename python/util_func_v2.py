@@ -164,8 +164,9 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False, max_it=None)
     rOld = g
     dOld = -g
     keep_going = True
+    norm_rOld = norm(rOld)
 
-    if norm(rOld) < eps:
+    if norm_rOld < eps:
         p = zOld
         return p, "small residual"
 
@@ -243,7 +244,7 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False, max_it=None)
                 print("The matrix is indefinite") if verbose else None
             return p, "neg. curve",
 
-        alphaj = norm(rOld)**2 / dBd
+        alphaj = norm_rOld**2 / dBd
         zNew = zOld + alphaj*dOld
         if norm(zNew) >= delta:
             tau = rootFinder(norm(dOld)**2, 2*np.dot(zOld.T, dOld), (norm(zOld)**2 - delta**2))
@@ -251,21 +252,51 @@ def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False, max_it=None)
             return p, "exceed TR"
 
         rNew = rOld + alphaj*B_dOld
-        if norm(rNew) <= eps or j > max_it:  # or norm(zNew - zOld) <= eps
+        norm_rNew = norm(rNew)
+        if norm_rNew <= eps or j > max_it:  # or norm(zNew - zOld) <= eps
             p = zNew
-            if norm(rNew) > eps:
+            if norm_rNew > eps:
                 print('CG should have converged by now') if verbose else None
                 return p, "Too many CG iterations"
             else:
                 return p, "Success in TR"
 
-        betaNew = norm(rNew)**2/norm(rOld)**2
+        ### add a conditional to see if residual has grown
+        # if so, something bad has happened, numerical instability
+
+        betaNew = norm_rNew**2/norm_rOld**2
         dNew = -rNew + betaNew*dOld
 
         dOld = dNew
         rOld = rNew
         zOld = zNew
+        norm_rOld = norm_rNew
         j += 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class structtype():
@@ -349,6 +380,7 @@ def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
         g = g.reshape((nv, 1))
     g = jnp.array(g)
     rOld = g
+    rOld_norm = norm(g)
     dOld = -g
     keep_going = True
 
@@ -356,15 +388,12 @@ def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
         p = zOld
         return p, "small residual"
 
-
     if not isinstance(Y, list):
         L = jnp.zeros((Y.shape[1], Y.shape[1]))
         sig = jnp.zeros(L.shape[0])
         for ii in range(Y.shape[1]):
-            #sig[ii] = jax.ops.index_update( sig, index[ii], jnp.dot(S[:, ii], Y[:, ii]))
             sig = index_update(sig, index[ii], jnp.dot(S[:, ii], Y[:, ii]))
             for jj in range(0, ii):
-                #L[ii, jj] = jnp.dot(S[:, ii], Y[:, jj])
                 L = index_update(L, index[ii,jj], jnp.dot(S[:, ii], Y[:, jj]))
 
         D = jnp.diag(sig)
@@ -389,7 +418,8 @@ def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
         # does direction have negative curvature?
         if dBd <= 0:
             # find tau that gives minimizer
-            tau = rootFinder(norm(dOld)**2, 2*zOld.T@dOld, (norm(zOld)**2 - delta**2))
+            zOld_norm = norm(zOld)
+            tau = rootFinder(zOld_norm**2, 2*zOld.T@dOld, (zOld_norm**2 - delta**2))
             p = zOld + tau*dOld
 
             if dBd == 0:
@@ -397,7 +427,7 @@ def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
 
             return p, "neg. curve",
 
-        alphaj = norm(rOld)**2 / dBd
+        alphaj = rOld_norm**2 / dBd
         zNew = zOld + alphaj*dOld
         if norm(zNew) >= delta:
             tau = rootFinder(norm(dOld)**2, 2*zOld.T@dOld, (norm(zOld)**2 - delta**2))
@@ -405,9 +435,10 @@ def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
             return p, "exceed TR"
 
         rNew = rOld + alphaj*B_dOld
-        if norm(rNew) <= eps or j > 3*nv:  # or norm(zNew - zOld) <= eps
+        rNew_norm = norm(rNew)
+        if rNew_norm <= eps or j > 3*nv:  # or norm(zNew - zOld) <= eps
             p = zNew
-            if norm(rNew) > eps:
+            if rNew_norm > eps:
                 if verbose: print('CG should have converged by now')
                 return p, "Too many CG iterations"
             else:
@@ -419,6 +450,7 @@ def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
         dOld = dNew
         rOld = rNew
         zOld = zNew
+        rOld_norm = rNew_norm
         j += 1
 
 
