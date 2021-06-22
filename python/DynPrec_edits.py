@@ -7,6 +7,7 @@ from numpy.linalg import norm
 import util_func_v2
 import time
 import pandas as pd
+import copy
 
 def DynTR(x0, fun, prec_vec, gtol=1.0e-5, max_iter=1000, verbose=False, max_memory=30, store_history=False,
           hessian_updates='sr1', tr_tol=1.e-5, delta_init=None, max_delta=1e4, sr1_tol=1.e-4):
@@ -252,8 +253,6 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
     prec_hist = list()
     inf_norm_hist = list()
     two_norm_hist = list()
-    step_size_hist = list()
-    delta_hist = list()
 
     it_f = list()
     it_prec_hist = list()
@@ -278,11 +277,12 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
     ## We will need to change this to pass it in rather than hard-coding
     # Maybe require these are in increasing
     precision_counter = {}
+    time_counter = {}
     inv_precision_dict = {}
     for key, value in precision_dict.items():
         precision_counter[key] = 0
         inv_precision_dict[value] = key
-
+        time_counter[key] = 0.0
     # always start at the lowest precision and set numerical precision to the max
     num_prec_idx = max(precision_dict.values())
     curr_prec_idx = min(precision_dict.values())
@@ -292,7 +292,11 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
     curr_prec_str = inv_precision_dict[curr_prec_idx]
 
     # first evaluation
+    ti = time.time()
     f, g = fun(x, curr_prec_str)
+    tf = time.time()
+
+    time_counter[curr_prec_str] += tf - ti
     precision_counter[curr_prec_str] += 1
 
     # store values if instructed to
@@ -338,7 +342,11 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
                 curr_prec_str = inv_precision_dict[curr_prec_idx]
                 print("Permanently switching evaluations to precision level ", curr_prec_str)
 
+                ti = time.time()
                 f, g = fun(x, curr_prec_str)
+                tf = time.time()
+
+                time_counter[curr_prec_str] += tf - ti
                 precision_counter[curr_prec_str] += 1
 
                 if store_history:
@@ -366,8 +374,22 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
             else:
                 print('Step gives model function increase of', -predicted_reduction) if verbose else None
 
+        # cast in new precision prior to pass to avoid time potentially spent in casting to-from different precisions
+        # in side the function calls.
+        if curr_prec_str == 'half':
+            x_plus_s = np.float16(x+s)
+        if curr_prec_str == 'single':
+            x_plus_s = np.float32(x+s)
+        if curr_prec_str == 'double':
+            x_plus_s = np.float64(x+s)
+
         # evaluate function at current precision at new trial point
-        fplus, gplus = fun(x+s, curr_prec_str)
+        ti = time.time()
+        #fplus, gplus = fun(x+s, curr_prec_str)
+        fplus, gplus = fun(x_plus_s, curr_prec_str)
+        tf = time.time()
+
+        time_counter[curr_prec_str] += tf - ti
         precision_counter[curr_prec_str] += 1
 
         # determine acceptance of trial point
@@ -387,8 +409,12 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
                 if curr_prec_idx < num_prec_idx:
                     temp_prec_str = num_prec_str  #
                     print("Probed a pair of function evaluations at precision level ", temp_prec_str) if verbose else None
+                    ti = time.time()
                     ftemp, gtemp = fun(x, temp_prec_str)
                     ftempplus, gtempplus = fun(x+s, temp_prec_str)
+                    tf = time.time()
+
+                    time_counter[temp_prec_str] += tf - ti
                     precision_counter[temp_prec_str] += 2
 
                     # initial theta (how different are evals at different precision, if big, increase precision)
@@ -403,8 +429,12 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
             if theta > eta_good*predicted_reduction and curr_prec_idx < num_prec_idx and delta < min(1.0, norm(g)):
                 temp_prec_str = num_prec_str
                 print("Probed a pair of function evaluations at ", temp_prec_str) if verbose else None
+                ti = time.time()
                 ftemp, gtemp = fun(x, temp_prec_str)
                 ftempplus, gtempplus = fun(x+s, temp_prec_str)
+                tf = time.time()
+
+                time_counter[temp_prec_str] += tf - ti
                 precision_counter[temp_prec_str] += 2
 
                 # might need to change this to ensure decrease in f and ftemp
@@ -494,7 +524,7 @@ def DynTR_for_pydda(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose
         success = False
 
     ret = util_func_v2.structtype(x=x, fun=f, jac=g, message=message, success=success, nfev=sum(precision_counter.values()),
-                                  nit=i, precision_counts=precision_counter)
+                                  nit=i, precision_counts=precision_counter, time_counter=time_counter)
 
     if store_history:
         ret.f_hist = np.array(f_hist)

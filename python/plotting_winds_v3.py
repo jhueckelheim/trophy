@@ -9,7 +9,7 @@ from datetime import datetime
 
 sys.path.append('/Users/clancy/repos/trophy/python/')
 sys.path.append('/home/clancy/repos/trophy/python/')
-
+sys.path.append('/home/rclancy/repos/trophy/python/')
 #import pydda
 
 #sys.path.append('/Users/clancy/local_packages/jaxpydda')
@@ -18,6 +18,7 @@ sys.path.append('/home/clancy/repos/trophy/python/')
 #sys.path.append('/Users/clancy/local_packages/dynTRpydda')
 sys.path.append('/Users/clancy/repos/trophy/python/dynTRpydda_edits')
 sys.path.append('/home/clancy/repos/trophy/python/dynTRpydda_edits')
+sys.path.append('/home/rclancy/repos/trophy/python/dynTRpydda_edits')
 
 #sys.path.append('/home/clancy/repos/trophy/python/dynTRpydda')
 #sys.path.append('/home/clancy/repos/trophy/python/')
@@ -58,10 +59,10 @@ aa, bb, cc = u_init.shape
 # should be 1 through 12
 
 
-tol = 1e-6
+tol = 1e0
 subprob_tol = 1e-8
 memory_size = 10
-wind_idx = 1
+wind_idx = 9
 
 try:
     winds = pd.read_csv("/Users/clancy/repos/trophy/python/wind_matrix.csv")
@@ -87,9 +88,13 @@ alg = ''
 for key in precisions.keys():
     alg += '_' + key
 alg = alg[1::]
-third_folder = '/home/clancy/trophy_data/'+alg+'/'
-if not os.path.isdir('/home/clancy'):
+if os.path.isdir('/home/clancy'):
+    third_folder = '/home/clancy/trophy_data/'+alg+'/'
+if os.path.isdir('/home/rclancy'):
+    third_folder = '/home/rclancy/trophy_data/'+alg+'/'
+if os.path.isdir('/Users/clancy'):
     third_folder = '/Users/clancy/trophy_data/'+alg+'/'
+
 if not os.path.isdir(third_folder):
     os.system('mkdir ' + third_folder)
 

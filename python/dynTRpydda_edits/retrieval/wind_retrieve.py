@@ -14,10 +14,12 @@ import sys, os
 sys.path.append('../')
 sys.path.append('/Users/clancy/repos/trophy/python/')
 sys.path.append('/home/clancy/repos/trophy/python/')
+sys.path.append('/home/rclancy/repos/trophy/python/')
 import FixedPrec
 import DynPrec_edits as DynPrec
 import jax
 import pandas as pd
+import copy
 
 #global prev_prec
 prev_prec = 1
@@ -551,7 +553,24 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
     parameters.point_list = points
     parameters.print_out = False
 
-    fun = lambda z, prec: obj_fun(z, parameters, prec)
+    # change precision of parameters so double isn't given an unfair advantage
+    params = copy.copy(parameters)
+    mydict = params.__dict__
+    for param_name in dir(params):
+        # for each parameter that isn't "built-in", take a look
+        if '__' not in param_name:
+            curr_param = mydict[param_name]
+            if isinstance(curr_param, (float, np.ndarray, np.float128, np.float64, np.float32)):
+                mydict[param_name] = np.float128(curr_param)
+            if isinstance(curr_param, list):
+                if len(curr_param) > 0:
+                    for ii, entry in enumerate(curr_param):
+                        if isinstance(entry, (np.ndarray, np.float128, np.float64, np.float32)):
+                            mydict[param_name][ii] = np.array(entry, dtype='float128')
+
+
+
+    fun = lambda z, prec: obj_fun(z, params, prec)
 
     t0 = time.time()
     temp = list()
@@ -571,6 +590,8 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
                      ret.nit, ret.nfev, ret.message]
         for key in ret.precision_counts:
             temp.append(ret.precision_counts[key])
+        for key in ret.precision_counts:
+            temp.append(ret.time_counter[key])
         temp = [temp, temp]  # pain in the butt work-around to save time time trying to write to csv
     else:
         winds = fmin_l_bfgs_b(J_function, winds, args=(parameters,), m=max_memory, maxiter=max_iterations,
@@ -591,7 +612,9 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
         fields = ['success', 'time', 'feval', 'grad2norm',
                   'grad_inf_norm', 'nits', 'fevals', 'message']
         for key in ret.precision_counts:
-            fields.append(key)
+            fields.append(key + '_counts')
+        for key in ret.time_counter:
+            fields.append(key + '_tottime')
 
         df_general = pd.DataFrame(data=temp, columns=fields)
         df_general.drop(index=1, inplace=True)  # drop additional unecessary row
