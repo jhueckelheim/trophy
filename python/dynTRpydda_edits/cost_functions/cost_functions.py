@@ -11,7 +11,7 @@ import copy
 # Added to incorpeate JAX within the cost functions
 from jax.config import config
 
-config.update("jax_enable_x64", True)
+#config.update("jax_enable_x64", True)
 from jax import float0
 
 
@@ -25,8 +25,8 @@ def get_correct_one(x):
         correct_one = np.float32(1.0)
     if isinstance(x, np.float64):
         correct_one = np.float64(1.0)
-    if x.dtype == 'bfloat16':
-        correct_one = np.asscalar(np.array(1.0, dtype='bfloat16'))
+    #if x.dtype == 'bfloat16':
+    #    correct_one = np.asscalar(np.array(1.0, dtype='bfloat16'))
 
     return correct_one
 
@@ -37,17 +37,20 @@ def change_precision(winds, params, precision):
     if precision == 'half':
         # prec_type = bfloat16
         # set_precision = lambda x: bfloat16(x)
+        jax.config.update("jax_enable_x64", False)
         prec_type = np.float16
         set_precision = lambda x: np.float16(x)
     if precision == 'single':
+        jax.config.update("jax_enable_x64", False)
         prec_type = np.float32
         set_precision = lambda x: np.float32(x)
     if precision == 'double':
+        jax.config.update("jax_enable_x64", True)
         prec_type = np.float64
         set_precision = lambda x: np.float64(x)
-    if precision == 'bhalf':
-        prec_type = 'bfloat16'
-        set_precision = lambda x: (np.asarray(x, dtype=prec_type))
+    #if precision == 'bhalf':
+    #    prec_type = 'bfloat16'
+    #    set_precision = lambda x: (np.asarray(x, dtype=prec_type))
 
         # CHANGE DATA TYPE HERE for WINDS and PARAMETERS THAT ARE DOUBLES
     winds = np.array(winds, dtype=prec_type)

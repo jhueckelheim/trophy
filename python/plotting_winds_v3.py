@@ -67,7 +67,10 @@ wind_idx = 9
 try:
     winds = pd.read_csv("/Users/clancy/repos/trophy/python/wind_matrix.csv")
 except:
-    winds = pd.read_csv("/home/clancy/repos/trophy/python/wind_matrix.csv")
+    try:
+        winds = pd.read_csv("/home/clancy/repos/trophy/python/wind_matrix.csv")
+    except:
+        winds = pd.read_csv("/home/rclancy/repos/trophy/python/wind_matrix.csv")
 winds = np.asarray(winds.iloc[:, wind_idx])
 winds = np.reshape(winds, (3, aa, bb, cc))
 u_init = winds[0]

@@ -554,20 +554,22 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
     parameters.print_out = False
 
     # change precision of parameters so double isn't given an unfair advantage
+
     params = copy.copy(parameters)
+    """
     mydict = params.__dict__
     for param_name in dir(params):
         # for each parameter that isn't "built-in", take a look
         if '__' not in param_name:
             curr_param = mydict[param_name]
             if isinstance(curr_param, (float, np.ndarray, np.float128, np.float64, np.float32)):
-                mydict[param_name] = np.float128(curr_param)
+                mydict[param_name] = np.float32(curr_param)
             if isinstance(curr_param, list):
                 if len(curr_param) > 0:
                     for ii, entry in enumerate(curr_param):
                         if isinstance(entry, (np.ndarray, np.float128, np.float64, np.float32)):
-                            mydict[param_name][ii] = np.array(entry, dtype='float128')
-
+                            mydict[param_name][ii] = np.array(entry, dtype='float32')
+    """
 
 
     fun = lambda z, prec: obj_fun(z, params, prec)
@@ -580,9 +582,11 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
         delta_init = norm(grad_J(winds, parameters, 'double'))
         delta_init = max(delta_init, 50)
         print('Using gtol:', gtol, 'Memory:', max_memory)
-        ret = DynPrec.DynTR_for_pydda(winds, fun, precision_dict, gtol=gtol, max_iter=max_iterations, verbose=True,
+        #ret = DynPrec.DynTR_for_pydda changed name of solver here.
+        ret = DynPrec.DynTR(winds, fun, precision_dict, gtol=gtol, max_iter=max_iterations, verbose=True,
                                       max_memory=max_memory, delta_init=delta_init, store_history=True,
                                       tr_tol=subproblem_tol, write_folder=write_folder)
+
         t_elapsed = time.time() - t0
         # the following allows us to go between stucture type to tuple type returned by fmin_l_bfgs_b
         winds = tuple((ret.x, ret.fun))
@@ -603,6 +607,7 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
         successful = True if "NORM_OF_PROJECTED" in d['task'] else False
         temp.append([successful, t_elapsed, my_f, norm(d['grad']), norm(d['grad'], np.inf),
                      d['nit'], d['funcalls'], 0, d['task']])
+
 
     print("Done! Time = " + "{:2.1f}".format(time.time() - bt))
 
