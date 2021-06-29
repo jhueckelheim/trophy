@@ -12,7 +12,7 @@ import copy
 
 # change name from DynTR_for_pydda to DynTR
 def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose=False, max_memory=30, store_history=False,
-                    tr_tol=1e-6, delta_init=None, max_delta=1e4, sr1_tol=1.e-4, write_folder=None):
+                    tr_tol=1e-6, delta_init=None, max_delta=1e6, sr1_tol=1.e-4, write_folder=None):
     """
     :param x0: numpy array, initialization
     :param fun:  objective/gradient function
@@ -49,7 +49,7 @@ def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose=False, ma
     machine_eps = np.finfo(float).eps
 
     # Internal algorithmic parameters: Should expose through a struct Type
-    eta_good = 0.01
+    eta_good = 0.001
     eta_great = 0.1
     gamma_dec = 0.5
     gamma_inc = 2
@@ -141,7 +141,8 @@ def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose=False, ma
                     print(message) if verbose else None
 
         s, crit = util_func_v2.CG_Steinhaug_matFree(tr_tol, g, delta, S, Y, gamma, verbose=False, max_it=10*max_memory)
-        predicted_reduction = np.sum(-0.5*(np.matmul(s.T, util_func_v2.Hessian_times_vec(Y,S,gamma,s))) - np.dot(s.T,g))  # this should be greater than zero
+        predicted_reduction = np.sum(-0.5*(np.matmul(s.T,
+                                                     util_func_v2.Hessian_times_vec(Y,S,gamma,s))) - np.dot(s.T,g))  # this should be greater than zero
 
         s = s.reshape((n,))
         if predicted_reduction <= 0:
@@ -176,7 +177,7 @@ def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose=False, ma
 
         # for Hessian updating:
         gprev = g
-
+        print('Monitor rho =', rho)
         if (rho < eta_good) or (predicted_reduction < 0):
             # the iteration was a failure
             xnew = x
@@ -239,11 +240,16 @@ def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, verbose=False, ma
             f = fplus
             g = gplus
 
+            norm_s = norm(s)
             # is the step great (do we get desired reduction from model and are we close to TR radius)?
-            if (norm(s) > 0.8*delta) and (rho > eta_great):
+            if (norm_s > 0.8*delta) and (rho > eta_great):
                 delta = min(max_delta, gamma_inc*delta)
             else:
-                delta = delta     #replacing above line with this since it's what algo states.
+                if norm_s > delta:
+                    # might have to excuse conditional statement that allows this
+                    delta = min(max_delta, gamma_inc*delta)
+                else:
+                    delta = delta     #replacing above line with this since it's what algo states.
 
         y = gplus-gprev
         if first_success == 1:

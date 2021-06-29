@@ -70,7 +70,7 @@ def updateYS(Y, S, y, s, memory, gamma, sr1_tol = 1e-4, verbose=False):
     :param sr1_tol: helps determine when to update Y and S
     :return: updated Y and S
     """
-    pred_grad = y - Hessian_times_vec(Y,S,gamma, s)
+    pred_grad = y - Hessian_times_vec(Y, S, gamma, s)
     dot_prod = np.dot(pred_grad,s)
     if abs(dot_prod) > sr1_tol*norm(pred_grad)*norm(s):
         if not isinstance(Y, list):
@@ -114,20 +114,6 @@ def Hessian_times_vec(Y, S, gamma, v):
     # Letting Hessian remain V to agree with convention elsewhere.
     nv = len(v)
     if not isinstance(Y, list):
-        ''' After timing, this is very slow especially for large matrices
-        L = np.zeros((Y.shape[1],Y.shape[1]))
-        R = np.zeros((S.shape[1],S.shape[1]))
-        d = np.zeros(L.shape[0])
-        r = np.zeros(L.shape[0])
-        for ii in range(Y.shape[1]):
-            d[ii] = np.dot(S[:, ii], Y[:, ii])
-            r[ii] = np.dot(S[:, ii], S[:, ii])
-            for jj in range(0, ii):
-                L[ii, jj] = np.dot(S[:, ii], Y[:, jj])
-                R[ii, jj] = np.dot(S[:, ii], S[:, jj])
-         
-        M = np.diag(d) + L + L.T - gamma*(np.diag(r) + R + R.T)  # np.dot(S.T, S)
-        '''
         # suprisingly much faster for large matrices
         temp1 = np.matmul(S.T, Y)
         M = np.tril(temp1) + np.triu(temp1.T, 1) - gamma*np.matmul(S.T, S)
@@ -151,7 +137,6 @@ def Hessian_times_vec(Y, S, gamma, v):
 
 
 def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False, max_it=None):
-
     nv = len(g)
     if max_it is None:
         max_it = 3*nv
@@ -339,166 +324,6 @@ class structtype():
 
 
 
-
-
-def Hessian_times_vec_JAX(Y, S, gamma, v):
-    # Letting Hessian remain V to agree with convention elsewhere.
-    nv = len(v)
-
-    if not isinstance(Y, list):
-        L = jnp.zeros((Y.shape[1],Y.shape[1]))
-        sig = jnp.zeros(L.shape[0])
-        for ii in range(Y.shape[1]):
-            sig = index_update(sig, index[ii], jnp.dot(S[:, ii], Y[:, ii]))
-            for jj in range(0,ii):
-                L = index_update(L, index[ii, jj], jnp.dot(S[:,ii], Y[:,jj]))
-
-        D = jnp.diag(sig)
-        M = D + L + L.T - gamma*jnp.matmul(S.T, S)
-        try:
-            Minv = jnp.linalg.inv(M)
-        except:
-            Minv = jnp.linalg.pinv(M)
-    else:
-        Minv = jnp.zeros((1,1))
-        Y = jnp.zeros((nv,1))
-        S = jnp.zeros((nv,1))
-
-    ################  Bk is approximation of Hessian...not it's inverse.
-    tmp1 = jnp.matmul( (Y - gamma*S).T, v)
-    tmp2 = jnp.matmul(Minv, tmp1)
-    B_v = jnp.matmul(Y - gamma*S, tmp2) + gamma*v
-    return B_v
-
-
-def CG_Steinhaug_matFree_JAX(eps, g, delta, S, Y, gamma, verbose=False):
-    nv = len(g)
-    zOld = jnp.zeros((nv, 1))
-    try:
-        g.shape[1]
-    except:
-        g = g.reshape((nv, 1))
-    g = jnp.array(g)
-    rOld = g
-    rOld_norm = norm(g)
-    dOld = -g
-    keep_going = True
-
-    if jnp.linalg.norm(rOld) < eps:
-        p = zOld
-        return p, "small residual"
-
-    if not isinstance(Y, list):
-        L = jnp.zeros((Y.shape[1], Y.shape[1]))
-        sig = jnp.zeros(L.shape[0])
-        for ii in range(Y.shape[1]):
-            sig = index_update(sig, index[ii], jnp.dot(S[:, ii], Y[:, ii]))
-            for jj in range(0, ii):
-                L = index_update(L, index[ii,jj], jnp.dot(S[:, ii], Y[:, jj]))
-
-        D = jnp.diag(sig)
-        M = L + L.T + D - gamma*jnp.matmul(S.T, S)
-        try:
-            Minv = jnp.linalg.inv(M)
-        except:
-            Minv = jnp.linalg.pinv(M)
-    else:
-        Minv = jnp.zeros((1, 1))
-        Y = jnp.zeros((nv, 1))
-        S = jnp.zeros((nv, 1))
-
-
-    j = 0
-    while keep_going:
-        temp1 = jnp.matmul( (Y-gamma*S).T, dOld)
-        temp2 = jnp.matmul(Minv, temp1)
-        B_dOld = jnp.matmul(Y-gamma*S, temp2) + gamma*dOld
-
-        dBd = jnp.matmul(dOld.T,B_dOld)
-        # does direction have negative curvature?
-        if dBd <= 0:
-            # find tau that gives minimizer
-            zOld_norm = norm(zOld)
-            tau = rootFinder(zOld_norm**2, 2*zOld.T@dOld, (zOld_norm**2 - delta**2))
-            p = zOld + tau*dOld
-
-            if dBd == 0:
-                if verbose: print("The matrix is indefinite")
-
-            return p, "neg. curve",
-
-        alphaj = rOld_norm**2 / dBd
-        zNew = zOld + alphaj*dOld
-        if norm(zNew) >= delta:
-            tau = rootFinder(norm(dOld)**2, 2*zOld.T@dOld, (norm(zOld)**2 - delta**2))
-            p = zOld + tau*dOld
-            return p, "exceed TR"
-
-        rNew = rOld + alphaj*B_dOld
-        rNew_norm = norm(rNew)
-        if rNew_norm <= eps or j > 3*nv:  # or norm(zNew - zOld) <= eps
-            p = zNew
-            if rNew_norm > eps:
-                if verbose: print('CG should have converged by now')
-                return p, "Too many CG iterations"
-            else:
-                return p, "Success in TR"
-
-        betaNew = norm(rNew)**2/norm(rOld)**2
-        dNew = -rNew + betaNew*dOld
-
-        dOld = dNew
-        rOld = rNew
-        zOld = zNew
-        rOld_norm = rNew_norm
-        j += 1
-
-
-def updateYS_JAX(Y, S, y, s, memory, gamma, sr1_tol = 1e-4, verbose=False):
-    """
-    :param Y: matrix of gradient differences
-    :param S: matrix of displacements
-    :param y: change in gradient
-    :param s: change in x
-    :param memory: memory allocation
-    :param sr1_tol: helps determine when to update Y and S
-    :return: updated Y and S
-    """
-    pred_grad = y - Hessian_times_vec_JAX(Y,S,gamma, s)
-    dot_prod = jnp.dot(pred_grad,s)
-    if abs(dot_prod) > sr1_tol*norm(pred_grad)*jnorm(s):
-        if not isinstance(Y, list):
-            # the dot product is large enough, update shouldn't cause instability
-            if Y.shape[1] >= memory:
-                # all memory used up, delete the oldest (y,s) pair
-                Y = Y[:, 1:memory]       # since indexed from zero, start at 1 not 2 and go to memory
-                S = S[:, 1:memory]
-
-
-        if isinstance(Y, list):
-            Y = y.reshape((y.shape[0],1))
-            S = s.reshape((s.shape[0],1))
-        else:
-            Y = np.hstack((Y,y.reshape((y.shape[0],1))))
-            S = np.hstack((S,s.reshape((s.shape[0],1))))
-
-        keep_going = True
-        while keep_going:
-            if S.shape[1] > 0:
-                Psi = Y - gamma*S
-                Minv = jnp.matmul(S.T, Y) - gamma*jnp.matmul(S.T, S)
-                tmp = min(jnp.linalg.eig( jnp.matmul(Psi.T, Psi))[0])
-                if tmp > 0 and jnp.linalg.det(Minv) != 0:
-                    keep_going = False
-                else:
-                    S = S[:, 1::]
-                    Y = Y[:, 1::]
-            else:
-                keep_going = False
-    else:
-        if verbose: print('Not updating Y and S')
-
-    return Y, S
 
 
 def BFGS_hessian_times_vec(Y,S,gamma,v,verbose=False):

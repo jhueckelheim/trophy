@@ -84,7 +84,7 @@ def change_precision(winds, params, precision):
                         if isinstance(entry, (np.ndarray, np.float128, np.float64, np.float32)):
                             mydict[param_name][ii] = np.array(entry, dtype=prec_type)
                             #mydict[param_name][ii] = entry.astype(prec_type)  # set_precision(entry)
-                            # print(param_name, type(mydict[param_name][ii]), mydict[param_name][ii].dtype)
+                            #print(param_name, type(mydict[param_name][ii]), mydict[param_name][ii].dtype)
 
     return winds, parameters
 

@@ -580,7 +580,7 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
     ####### TESTING TRUST REGION SOLVER WITH JAX FUNCTIONS
     if use_dynTR:
         delta_init = norm(grad_J(winds, parameters, 'double'))
-        delta_init = max(delta_init, 50)
+        #delta_init = max(delta_init, 50)
         print('Using gtol:', gtol, 'Memory:', max_memory)
         #ret = DynPrec.DynTR_for_pydda changed name of solver here.
         ret = DynPrec.DynTR(winds, fun, precision_dict, gtol=gtol, max_iter=max_iterations, verbose=True,
