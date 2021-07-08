@@ -7,9 +7,9 @@ import pandas as pd
 from datetime import datetime
 
 # change to location of trophy repo
-repo_path = os.environ['HOME'] + '/repos/'
-sys.path.append(repo_path + 'trophy/python/')
-sys.path.append(repo_path + 'trophy/python/dynTRpydda_edits/')
+trophy_repo_path = os.environ['HOME'] + '/repos/trophy/'
+sys.path.insert(0, trophy_repo_path + 'python/')
+sys.path.insert(0, trophy_repo_path + 'python/dynTRpydda_edits/')
 
 import dynTRpydda_edits as pydda
 
@@ -46,13 +46,14 @@ subprob_tol = 1e-8
 memory_size = 10
 wind_idx = 9
 
-try:
-    winds = pd.read_csv("/Users/clancy/repos/trophy/python/wind_matrix.csv")
-except:
-    try:
-        winds = pd.read_csv("/home/clancy/repos/trophy/python/wind_matrix.csv")
-    except:
-        winds = pd.read_csv("/home/rclancy/repos/trophy/python/wind_matrix.csv")
+winds = pd.read_csv(trophy_repo_path + 'python/wind_matrix.csv')
+#try:
+#    winds = pd.read_csv("/Users/clancy/repos/trophy/python/wind_matrix.csv")
+#except:
+#    try:
+#        winds = pd.read_csv("/home/clancy/repos/trophy/python/wind_matrix.csv")
+#    except:
+#        winds = pd.read_csv("/home/rclancy/repos/trophy/python/wind_matrix.csv")
 winds = np.asarray(winds.iloc[:, wind_idx])
 winds = np.reshape(winds, (3, aa, bb, cc))
 u_init = winds[0]

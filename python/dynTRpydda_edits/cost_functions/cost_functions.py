@@ -11,7 +11,7 @@ import copy
 # Added to incorpeate JAX within the cost functions
 from jax.config import config
 
-#config.update("jax_enable_x64", True)
+config.update("jax_enable_x64", True)
 from jax import float0
 
 
@@ -43,15 +43,15 @@ def change_precision(winds, params, precision):
 
 
     if precision == 'half':
-        jax.config.update("jax_enable_x64", False)
+        #jax.config.update("jax_enable_x64", False)
         prec_type = np.float16
         set_precision = lambda x: np.float16(x)
     if precision == 'single':
-        jax.config.update("jax_enable_x64", False)
+        #jax.config.update("jax_enable_x64", False)
         prec_type = np.float32
         set_precision = lambda x: np.float32(x)
     if precision == 'double':
-        jax.config.update("jax_enable_x64", True)
+        #jax.config.update("jax_enable_x64", True)
         prec_type = np.float64
         set_precision = lambda x: np.float64(x)
     #if precision == 'bhalf':

@@ -176,7 +176,7 @@ def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, eta_good=0.001, e
 
         # for Hessian updating:
         gprev = g
-        print('rho =', rho) if verbose else None
+        #print('rho =', rho) if verbose else None
 
         # does the model give enough of a decrease for acceptance?
         if (rho < eta_good) or (predicted_reduction < 0):
@@ -298,7 +298,7 @@ def DynTR(x0, fun, precision_dict, gtol=1.0e-5, max_iter=1000, eta_good=0.001, e
 
         if verbose:
             # f, g, and delta are values used for next TR solve norm_s and criteria are both from previous iterate
-            print("iter: ", i+1, ", f: ", f, ", new_delta: ", delta, ", norm(g): ", norm(g), "norm(s): ", norm_s,
+            print("iter: ", i+1, "rho: ", np.round(rho, 4), ", f: ", f, ", new_delta: ", delta, ", norm(g): ", norm(g), "norm(s): ", norm_s,
                   ' stopping criteria:', crit, "||g||_inf:", norm(g, np.inf))
 
         # are we actually getting numbers from function evaluations?

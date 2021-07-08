@@ -7,8 +7,8 @@ import warnings
 
 # change to location of trophy repo
 repo_path = os.environ['HOME'] + '/repos/'
-sys.path.append(repo_path + 'trophy/python/')
-sys.path.append(repo_path + 'trophy/python/dynTRpydda/')
+sys.path.insert(0, repo_path + 'trophy/python/')
+sys.path.insert(0, repo_path + 'trophy/python/dynTRpydda/')
 
 import dynTRpydda as pydda
 

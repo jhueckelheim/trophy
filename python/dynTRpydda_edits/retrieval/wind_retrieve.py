@@ -11,11 +11,8 @@ import time
 import cartopy.crs as ccrs
 import math
 import sys, os
-sys.path.append('../')
-sys.path.append('/Users/clancy/repos/trophy/python/')
-sys.path.append('/home/clancy/repos/trophy/python/')
-sys.path.append('/home/rclancy/repos/trophy/python/')
-import FixedPrec
+
+
 import DynPrec
 import jax
 import pandas as pd

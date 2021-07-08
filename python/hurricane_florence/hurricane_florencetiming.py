@@ -9,8 +9,8 @@ import numpy as np
 
 # change to location of trophy repo
 repo_path = os.environ['HOME'] + '/repos/'
-sys.path.append(repo_path + 'trophy/python/')
-sys.path.append(repo_path + 'trophy/python/dynTRpydda_for_timing/')
+sys.path.insert(0, repo_path + 'trophy/python/')
+sys.path.insert(0, repo_path + 'trophy/python/dynTRpydda_for_timing/')
 import dynTRpydda_for_timing as pydda
 
 warnings.filterwarnings("ignore")
