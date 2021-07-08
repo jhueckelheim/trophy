@@ -2,22 +2,18 @@ import urllib
 import pyart
 import sys, os
 import pandas as pd
-#import pydda
-
-#sys.path.append('/Users/clancy/local_packages/jaxpydda')
-#import jaxpydda as pydda
-
-#sys.path.append('/Users/clancy/local_packages/')
-#sys.path.append('/Users/clancy/local_packages/dynTRpydda')
-sys.path.append('/Users/clancy/repos/trophy/python/')
-sys.path.append('/Users/clancy/repos/trophy/python/dynTRpydda_edits')
-import dynTRpydda_edits as pydda
 import warnings
-warnings.filterwarnings("ignore")
-
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import numpy as np
+
+# change to location of trophy repo
+repo_path = os.environ['HOME'] + '/repos/'
+sys.path.append(repo_path + 'trophy/python/')
+sys.path.append(repo_path + 'trophy/python/dynTRpydda_edits/')
+import dynTRpydda_edits as pydda
+
+warnings.filterwarnings("ignore")
 
 #hrrr_url = ('https://pando-rgw01.chpc.utah.edu/hrrr/prs/20180914/' +
 #            'hrrr.t06z.wrfprsf00.grib2')
@@ -28,7 +24,7 @@ precisions = {'single': 1, 'double': 2}
 
 tol = 1e-2
 subprob_tol = 1e-6
-memory_size = 10
+memory_size = 5
 seed_val = 1
 dt_string = 'run' + str(seed_val)
 alg = ''
@@ -68,26 +64,30 @@ u_init, v_init, w_init = pydda.initialization.make_constant_wind_field(
 aa, bb, cc = u_init.shape
 
 # read warm start, extract winds column, then convert to numpy array and reshape
-#init_winds = np.asarray(pd.read_csv('./winds_and_gradient.csv')['winds'])
-#init_winds = np.reshape(init_winds, (3, aa, bb, cc))
+init_winds = np.asarray(pd.read_csv('./winds_and_gradient.csv')['winds'])
+init_winds = np.reshape(init_winds, (3, aa, bb, cc))
 
-#u_init = init_winds[0]
-#v_init = init_winds[1]
-#w_init = init_winds[2]
+u_init = init_winds[0]
+v_init = init_winds[1]
+w_init = init_winds[2]
+
+u_init = np.zeros(u_init.shape)
+v_init = np.zeros(u_init.shape)
+w_init = np.zeros(u_init.shape)
 
 
-
+'''
 np.random.seed(seed_val)
 
 u_init = u_init + np.random.normal(0, 1, u_init.shape)
 v_init = v_init + np.random.normal(0, 1, v_init.shape)
 w_init = w_init + np.random.normal(0, 1, w_init.shape)
-
+'''
 
 
 out_grids = pydda.retrieval.get_dd_wind_field(
     [grid_mhx, grid_ltx], u_init, v_init, w_init, Co=0.1, Cm=1000.0, Cmod=1e-3,
     mask_outside_opt=True, vel_name='corrected_velocity', model_fields=["hrrr"], store_history=True,
     filt_iterations=0, max_memory=memory_size, use_dynTR=True, gtol=tol, precision_dict=precisions,
-    subproblem_tol=subprob_tol, write_folder=fourth_folder)
+    subproblem_tol=subprob_tol, write_folder=fourth_folder, jax_on=False)
 

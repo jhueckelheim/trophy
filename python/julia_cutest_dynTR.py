@@ -5,7 +5,7 @@ import julia
 from julia import Main
 import tensorflow as tf
 import time
-from DynPrec_edits import DynTR
+from DynPrec import DynTR
 
 """
 1. Create function handle that calls Julia with variable and precision as the inputs. 

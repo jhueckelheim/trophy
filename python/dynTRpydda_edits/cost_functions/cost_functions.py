@@ -34,9 +34,15 @@ def get_correct_one(x):
 
 
 def change_precision(winds, params, precision):
+    """
+    :param winds: variable we wish to optimize
+    :param params: problem parameters
+    :param precision: precision to compute (half, single, or double)
+    :return: winds variable in appropriate precision
+    """
+
+
     if precision == 'half':
-        # prec_type = bfloat16
-        # set_precision = lambda x: bfloat16(x)
         jax.config.update("jax_enable_x64", False)
         prec_type = np.float16
         set_precision = lambda x: np.float16(x)
@@ -59,37 +65,41 @@ def change_precision(winds, params, precision):
     """
     This is super sloppy, but we loop through the parameters here to force a change to the desired precision each time 
     the function is evaluated. By doing so, we pass the appropriate precision to all the other cost function evaluations 
-    rather than switching a configuration flag.
+    rather than switching a configuration flag. A better way is to pass appropriate parameters into the objective func
     
-    We could have problems with the following code if we have entries from u_model, v_model
+    We could have problems with the following code if we have entries from u_model, v_model. 
     """
     # create dictionary of pararameter
     parameters = copy.copy(params)
-
     mydict = parameters.__dict__
 
     for param_name in dir(parameters):
-        # for each parameter that isn't "built-in", take a look
+        # make sure its not a built in method
         if '__' not in param_name:
-            # print(param_name)
             curr_param = mydict[param_name]
-            # print(param_name, type(curr_param), isinstance(curr_param, (np.ndarray, np.float, np.float64, np.float32, np.float16)))
+
+            # for scalars, force precision level. This might be an issue if it uses imprecise computation or if GPU
+            # doesn't know how to handle half. The precisions might be inexact.
             if isinstance(curr_param, (float, np.ndarray, np.float128, np.float64, np.float32)):
                 mydict[param_name] = set_precision(curr_param)
-                # print(type(mydict[param_name]), '\n\n')
+            # is there a list entry for current parameter?
             if isinstance(curr_param, list):
+                # is the list non-empty?
                 if len(curr_param) > 0:
                     for ii, entry in enumerate(curr_param):
-                        # print(param_name, type(entry), entry.dtype)
+                        # is the parameter list composed of numpy arrays?
                         if isinstance(entry, (np.ndarray, np.float128, np.float64, np.float32)):
-                            mydict[param_name][ii] = np.array(entry, dtype=prec_type)
-                            #mydict[param_name][ii] = entry.astype(prec_type)  # set_precision(entry)
-                            #print(param_name, type(mydict[param_name][ii]), mydict[param_name][ii].dtype)
+                            if isinstance(entry, np.ma.core.MaskedArray):
+                                # set masked arrays to masked arrays
+                                mydict[param_name][ii] = np.ma.masked_array(entry, dtype=prec_type)
+                            else:
+                                # otherwise, use numpy array
+                                mydict[param_name][ii] = np.array(entry, dtype=prec_type)
 
     return winds, parameters
 
 
-def J_function(winds, parameters, precision):
+def J_function(winds, parameters, precision, jax_on=True):
     """
     Calculates the total cost function. This typically does not need to be
     called directly as get_dd_wind_field is a wrapper around this function and
@@ -117,19 +127,18 @@ def J_function(winds, parameters, precision):
     winds, parameters = change_precision(winds, parameters, precision)
 
     # Had to change to float because Jax returns device array (use np.float_())
-    Jvel = (calculate_radial_vel_cost_function(
+    Jvel = calculate_radial_vel_cost_function(
         parameters.vrs, parameters.azs, parameters.els,
         winds[0], winds[1], winds[2], parameters.wts, rmsVr=parameters.rmsVr,
-        weights=parameters.weights, coeff=parameters.Co))
-    # print("apples Jvel", Jvel)
+        weights=parameters.weights, coeff=parameters.Co, jax_on=jax_on)
 
     if (parameters.Cm > 0):
         # Had to change to float because Jax returns device array (use np.float_())
-        Jmass = (calculate_mass_continuity(
+        Jmass = calculate_mass_continuity(
             winds[0], winds[1], winds[2],
             parameters.z,
             parameters.dx, parameters.dy, parameters.dz,
-            coeff=parameters.Cm))
+            coeff=parameters.Cm, jax_on=jax_on)
     else:
         Jmass = 0
 
@@ -152,7 +161,7 @@ def J_function(winds, parameters, precision):
         Jvorticity = np.float_(calculate_vertical_vorticity_cost(
             winds[0], winds[1], winds[2], parameters.dx,
             parameters.dy, parameters.dz, parameters.Ut,
-            parameters.Vt, coeff=parameters.Cv))
+            parameters.Vt, coeff=parameters.Cv, jax_on=jax_on))
     else:
         Jvorticity = 0
 
@@ -184,12 +193,18 @@ def J_function(winds, parameters, precision):
                "{:9.4f}".format(Jpoint)) + '|' +
               "{:9.4f}".format(np.ma.max(np.ma.abs(winds[2]))))
 
+    Jtot = Jvel + Jmass + Jsmooth + Jbackground + Jvorticity + Jmod + Jpoint
     # print("The cost functions print", Jvel + Jmass)
+    if Jvel.dtype == 'float16':
+        Jtot = np.float16(Jtot)
+    if Jvel.dtype == 'float32':
+        Jtot = np.float32(Jtot)
+    if Jvel.dtype == 'float64':
+        Jtot = np.float64(Jtot)
+    return Jtot
 
-    return Jvel + Jmass + Jsmooth + Jbackground + Jvorticity + Jmod + Jpoint
 
-
-def grad_J(winds, parameters, precision):
+def grad_J(winds, parameters, precision, jax_on=True):
     """
     Calculates the gradient of the cost function. This typically does not need
     to be called directly as get_dd_wind_field is a wrapper around this
@@ -219,14 +234,14 @@ def grad_J(winds, parameters, precision):
     grad = calculate_grad_radial_vel(
         parameters.vrs, parameters.els, parameters.azs,
         winds[0], winds[1], winds[2], parameters.wts, parameters.weights,
-        parameters.rmsVr, coeff=parameters.Co, upper_bc=parameters.upper_bc)
+        parameters.rmsVr, coeff=parameters.Co, upper_bc=parameters.upper_bc, jax_on=jax_on)
 
     if (parameters.Cm > 0):
         grad += calculate_mass_continuity_gradient(
             winds[0], winds[1], winds[2],
             parameters.z,
             parameters.dx, parameters.dy, parameters.dz,
-            coeff=parameters.Cm, upper_bc=parameters.upper_bc)
+            coeff=parameters.Cm, upper_bc=parameters.upper_bc, jax_on=jax_on)
 
     if (parameters.Cx > 0 or parameters.Cy > 0 or parameters.Cz > 0):
         grad += calculate_smoothness_gradient(
@@ -243,7 +258,7 @@ def grad_J(winds, parameters, precision):
         grad += calculate_vertical_vorticity_gradient(
             winds[0], winds[1], winds[2], parameters.dx,
             parameters.dy, parameters.dz, parameters.Ut,
-            parameters.Vt, coeff=parameters.Cv)
+            parameters.Vt, coeff=parameters.Cv, jax_on=jax_on)
 
     if (parameters.Cmod > 0):
         grad += calculate_model_gradient(
@@ -266,7 +281,7 @@ def grad_J(winds, parameters, precision):
 
 # Using Jax Version
 def calculate_radial_vel_cost_function(vrs, azs, els, u, v,
-                                       w, wts, rmsVr, weights, coeff=1.0):
+                                       w, wts, rmsVr, weights, coeff=1.0, jax_on=True):
     """
     Calculates the cost function due to difference of the wind field from
     radar radial velocities. For more information on this cost function, see
@@ -316,43 +331,43 @@ def calculate_radial_vel_cost_function(vrs, azs, els, u, v,
     Equation in Variational Dual-Doppler Wind Analysis. J. Atmos. Oceanic
     Technol., 26, 2089–2106, https://doi.org/10.1175/2009JTECHA1256.1
    
-    
-    J_o = 0
-    lambda_o = coeff / (rmsVr * rmsVr)
-    for i in range(len(vrs)):
-        v_ar = (np.cos(els[i])*np.sin(azs[i])*u +
-                np.cos(els[i])*np.cos(azs[i])*v +
-                np.sin(els[i])*(w - np.abs(wts[i])))
-        the_weight = weights[i]
-        the_weight[els[i].mask] = 0
-        the_weight[azs[i].mask] = 0
-        the_weight[vrs[i].mask] = 0
-        the_weight[wts[i].mask] = 0
-        J_o += lambda_o*np.sum(np.square(vrs[i] - v_ar)*the_weight)
-
-    return J_o
-
     """
-    # Jax version of the cost function
-    J_o = 0
-    lambda_o = coeff / (rmsVr * rmsVr)
-    for i in range(len(vrs)):
-        v_ar = (jnp.cos(els[i]) * jnp.sin(azs[i]) * u +
-                jnp.cos(els[i]) * jnp.cos(azs[i]) * v +
-                jnp.sin(els[i]) * (w - jnp.abs(wts[i])))
-        the_weight = jnp.asarray(weights[i])
-        # the_weight = jax.ops.index_update(the_weight, jax.ops.index[els[i].mask], 0)
-        # the_weight = jax.ops.index_update(the_weight, jax.ops.index[azs[i].mask], 0)
-        # the_weight = jax.ops.index_update(the_weight, jax.ops.index[vrs[i].mask], 0)
-        # the_weight = jax.ops.index_update(the_weight, jax.ops.index[wts[i].mask], 0)
-        # J_o += lambda_o*jnp.sum(jnp.square(vrs[i] - v_ar)*the_weight)
-        J_o += jnp.sum(jnp.square(jnp.sqrt(the_weight) * jnp.sqrt(lambda_o) * (vrs[i] - v_ar)))
+
+    if not jax_on:
+        J_o = np.array(0., dtype=type(coeff))
+        lambda_o = coeff / (rmsVr * rmsVr)
+        for i in range(len(vrs)):
+            v_ar = (np.cos(els[i])*np.sin(azs[i])*u +
+                    np.cos(els[i])*np.cos(azs[i])*v +
+                    np.sin(els[i])*(w - np.abs(wts[i])))
+            the_weight = weights[i]
+            the_weight[els[i].mask] = 0
+            the_weight[azs[i].mask] = 0
+            the_weight[vrs[i].mask] = 0
+            the_weight[wts[i].mask] = 0
+            J_o += lambda_o*np.sum(np.square(vrs[i] - v_ar)*the_weight)
+    else:
+        #"""
+        # Jax version of the cost function
+        J_o = 0
+        lambda_o = coeff / (rmsVr * rmsVr)
+        for i in range(len(vrs)):
+            v_ar = (jnp.cos(els[i]) * jnp.sin(azs[i]) * u +
+                    jnp.cos(els[i]) * jnp.cos(azs[i]) * v +
+                    jnp.sin(els[i]) * (w - jnp.abs(wts[i])))
+            the_weight = jnp.asarray(weights[i])
+            # the_weight = jax.ops.index_update(the_weight, jax.ops.index[els[i].mask], 0)
+            # the_weight = jax.ops.index_update(the_weight, jax.ops.index[azs[i].mask], 0)
+            # the_weight = jax.ops.index_update(the_weight, jax.ops.index[vrs[i].mask], 0)
+            # the_weight = jax.ops.index_update(the_weight, jax.ops.index[wts[i].mask], 0)
+            # J_o += lambda_o*jnp.sum(jnp.square(vrs[i] - v_ar)*the_weight)
+            J_o += jnp.sum(jnp.square(jnp.sqrt(the_weight) * jnp.sqrt(lambda_o) * (vrs[i] - v_ar)))
     return J_o
 
 
 # Using Jax Version
 def calculate_grad_radial_vel(vrs, els, azs, u, v, w,
-                              wts, weights, rmsVr, coeff=1.0, upper_bc=True):
+                              wts, weights, rmsVr, coeff=1.0, upper_bc=True, jax_on=True):
     """
     Calculates the gradient of the cost function due to difference of wind
     field from radar radial velocities.
@@ -396,77 +411,71 @@ def calculate_grad_radial_vel(vrs, els, azs, u, v, w,
     
 
 
-
+    """
     # Use zero for all masked values since we don't want to add them into
     # the cost function
-    
-    
-    p_x1 = np.zeros(vrs[0].shape)
-    p_y1 = np.zeros(vrs[0].shape)
-    p_z1 = np.zeros(vrs[0].shape)
-    lambda_o = coeff / (rmsVr * rmsVr)
+    if not jax_on:
+        data_type = type(rmsVr)
+        p_x1 = np.zeros(vrs[0].shape, dtype=data_type)
+        p_y1 = np.zeros(vrs[0].shape, dtype=data_type)
+        p_z1 = np.zeros(vrs[0].shape, dtype=data_type)
+        lambda_o = coeff / (rmsVr * rmsVr)
 
-    for i in range(len(vrs)):
-        v_ar = (np.cos(els[i])*np.sin(azs[i])*u +
-                np.cos(els[i])*np.cos(azs[i])*v +
-                np.sin(els[i])*(w - np.abs(wts[i])))
+        for i in range(len(vrs)):
+            v_ar = (np.cos(els[i])*np.sin(azs[i])*u +
+                    np.cos(els[i])*np.cos(azs[i])*v +
+                    np.sin(els[i])*(w - np.abs(wts[i])))
 
-        x_grad = (2*(v_ar - vrs[i]) * np.cos(els[i]) *
-                  np.sin(azs[i]) * weights[i]) * lambda_o
-        y_grad = (2*(v_ar - vrs[i]) * np.cos(els[i]) *
-                  np.cos(azs[i]) * weights[i]) * lambda_o
-        z_grad = (2*(v_ar - vrs[i]) * np.sin(els[i]) * weights[i]) * lambda_o
+            x_grad = (2*(v_ar - vrs[i]) * np.cos(els[i]) *
+                      np.sin(azs[i]) * weights[i]) * lambda_o
+            y_grad = (2*(v_ar - vrs[i]) * np.cos(els[i]) *
+                      np.cos(azs[i]) * weights[i]) * lambda_o
+            z_grad = (2*(v_ar - vrs[i]) * np.sin(els[i]) * weights[i]) * lambda_o
 
-        x_grad[els[i].mask] = 0
-        y_grad[els[i].mask] = 0
-        z_grad[els[i].mask] = 0
-        x_grad[azs[i].mask] = 0
-        y_grad[azs[i].mask] = 0
-        z_grad[azs[i].mask] = 0
+            x_grad[els[i].mask] = 0
+            x_grad[azs[i].mask] = 0
+            x_grad[vrs[i].mask] = 0
+            x_grad[wts[i].mask] = 0
+            y_grad[els[i].mask] = 0
+            y_grad[azs[i].mask] = 0
+            y_grad[vrs[i].mask] = 0
+            y_grad[wts[i].mask] = 0
+            z_grad[els[i].mask] = 0
+            z_grad[azs[i].mask] = 0
+            z_grad[vrs[i].mask] = 0
+            z_grad[wts[i].mask] = 0
 
-        x_grad[els[i].mask] = 0
-        x_grad[azs[i].mask] = 0
-        x_grad[vrs[i].mask] = 0
-        x_grad[wts[i].mask] = 0
-        y_grad[els[i].mask] = 0
-        y_grad[azs[i].mask] = 0
-        y_grad[vrs[i].mask] = 0
-        y_grad[wts[i].mask] = 0
-        z_grad[els[i].mask] = 0
-        z_grad[azs[i].mask] = 0
-        z_grad[vrs[i].mask] = 0
-        z_grad[wts[i].mask] = 0
+            p_x1 += x_grad
+            p_y1 += y_grad
+            p_z1 += z_grad
 
-        p_x1 += x_grad
-        p_y1 += y_grad
-        p_z1 += z_grad
+        # Impermeability condition
+        p_z1[0, :, :] = 0
+        if(upper_bc is True):
+            p_z1[-1, :, :] = 0
+        y = np.stack((p_x1, p_y1, p_z1), axis=0)
+        return y.flatten()
+    #"""
+    else:
+        # Jax version of the gradient cost function
+        # grad_calc_p_x1 = jax.grad(calculate_radial_vel_cost_function, argnums = 3)
+        # grad_calc_p_y1 = jax.grad(calculate_radial_vel_cost_function, argnums = 4)
+        # grad_calc_p_z1 = jax.grad(calculate_radial_vel_cost_function, argnums = 5)
 
-    # Impermeability condition
-    p_z1[0, :, :] = 0
-    if(upper_bc is True):
-        p_z1[-1, :, :] = 0
-    y = np.stack((p_x1, p_y1, p_z1), axis=0)
-    return y.flatten()
-    """
-    # Jax version of the gradient cost function
-    # grad_calc_p_x1 = jax.grad(calculate_radial_vel_cost_function, argnums = 3)
-    # grad_calc_p_y1 = jax.grad(calculate_radial_vel_cost_function, argnums = 4)
-    # grad_calc_p_z1 = jax.grad(calculate_radial_vel_cost_function, argnums = 5)
+        # p_x1 = grad_calc_p_x1(vrs, azs, els, u, v, w, wts, rmsVr, weights)
+        # p_y1 = grad_calc_p_y1(vrs, azs, els, u, v, w, wts, rmsVr, weights)
+        # p_z1 = grad_calc_p_z1(vrs, azs, els, u, v, w, wts, rmsVr, weights)
 
-    # p_x1 = grad_calc_p_x1(vrs, azs, els, u, v, w, wts, rmsVr, weights)
-    # p_y1 = grad_calc_p_y1(vrs, azs, els, u, v, w, wts, rmsVr, weights)
-    # p_z1 = grad_calc_p_z1(vrs, azs, els, u, v, w, wts, rmsVr, weights)
+        primals, fun_vjp = jax.vjp(calculate_radial_vel_cost_function, vrs, azs, els, u, v, w, wts, rmsVr, weights)
+        formatted_one = get_correct_one(rmsVr)
+        _, _, _, p_x1, p_y1, p_z1, _, _, _ = fun_vjp(formatted_one)
 
-    primals, fun_vjp = jax.vjp(calculate_radial_vel_cost_function, vrs, azs, els, u, v, w, wts, rmsVr, weights)
-    formatted_one = get_correct_one(rmsVr)
-    _, _, _, p_x1, p_y1, p_z1, _, _, _ = fun_vjp(formatted_one)
-
-    # Impermeability condition
-    p_z1 = jax.ops.index_update(p_z1, jax.ops.index[0, :, :], 0)
-    if (upper_bc is True):
-        p_z1 = jax.ops.index_update(p_z1, jax.ops.index[-1, :, :], 0)
-    y = jnp.stack((p_x1, p_y1, p_z1), axis=0)
-    return np.copy(y.flatten())
+        # Impermeability condition
+        p_z1 = jax.ops.index_update(p_z1, jax.ops.index[0, :, :], 0)
+        if (upper_bc is True):
+            p_z1 = jax.ops.index_update(p_z1, jax.ops.index[-1, :, :], 0)
+        y = jnp.stack((p_x1, p_y1, p_z1), axis=0)
+        return np.copy(y.flatten())
 
 
 def calculate_smoothness_cost(u, v, w, Cx=1e-5, Cy=1e-5, Cz=1e-5):
@@ -656,7 +665,7 @@ def calculate_point_gradient(u, v, x, y, z, point_list, Cp=1e-3, roi=500.0):
 
 
 # Using Jax version of function
-def calculate_mass_continuity(u, v, w, z, dx, dy, dz, coeff=1500.0, anel=1):
+def calculate_mass_continuity(u, v, w, z, dx, dy, dz, coeff=1500.0, anel=1, jax_on=True):
     """
     Calculates the mass continuity cost function by taking the divergence
     of the wind field.
@@ -689,37 +698,40 @@ def calculate_mass_continuity(u, v, w, z, dx, dy, dz, coeff=1500.0, anel=1):
     -------
     J: float
         value of mass continuity cost function
-    
-    dudx = np.gradient(u, dx, axis=2)
-    dvdy = np.gradient(v, dy, axis=1)
-    dwdz = np.gradient(w, dz, axis=0)
-
-    if(anel == 1):
-        rho = np.exp(-z/10000.0)
-        drho_dz = np.gradient(rho, dz, axis=0)
-        anel_term = w/rho*drho_dz
-    else:
-        anel_term = np.zeros(w.shape)
-    return coeff*np.sum(np.square(dudx + dvdy + dwdz + anel_term))/2.0
     """
-    # Jax version of the cost function
-    dudx = jnp.gradient(u, dx, axis=2)
-    dvdy = jnp.gradient(v, dy, axis=1)
-    dwdz = jnp.gradient(w, dz, axis=0)
+    if not jax_on:
+        dudx = np.gradient(u, dx, axis=2)
+        dvdy = np.gradient(v, dy, axis=1)
+        dwdz = np.gradient(w, dz, axis=0)
 
-    if (anel == 1):
-        rho = jnp.exp(-z / 10000.0)
-        drho_dz = jnp.gradient(rho, dz, axis=0)
-        anel_term = w / rho * drho_dz
+        if(anel == 1):
+            rho = np.exp(-z/10000.0)
+            drho_dz = np.gradient(rho, dz, axis=0)
+            anel_term = w/rho*drho_dz
+        else:
+            anel_term = np.zeros(w.shape)
+        #return coeff*np.sum(np.square(dudx + dvdy + dwdz + anel_term))/2.0
+        return np.array(coeff*np.sum(np.square(dudx + dvdy + dwdz + anel_term))/2.0, dtype=type(coeff))
+        #"""
     else:
-        anel_term = jnp.zeros(w.shape)
-    return coeff * jnp.sum(jnp.square(dudx + dvdy + dwdz + anel_term)) / 2.0
+        # Jax version of the cost function
+        dudx = jnp.gradient(u, dx, axis=2)
+        dvdy = jnp.gradient(v, dy, axis=1)
+        dwdz = jnp.gradient(w, dz, axis=0)
+
+        if (anel == 1):
+            rho = jnp.exp(-z / 10000.0)
+            drho_dz = jnp.gradient(rho, dz, axis=0)
+            anel_term = w / rho * drho_dz
+        else:
+            anel_term = jnp.zeros(w.shape)
+        return coeff * jnp.sum(jnp.square(dudx + dvdy + dwdz + anel_term)) / 2.0
 
 
 # Using Jax version of function
 def calculate_mass_continuity_gradient(u, v, w, z, dx,
                                        dy, dz, coeff=1500.0, anel=1,
-                                       upper_bc=True):
+                                       upper_bc=True, jax_on=True):
     """
     Calculates the gradient of mass continuity cost function. This is done by
     taking the negative gradient of the divergence of the wind field.
@@ -751,45 +763,47 @@ def calculate_mass_continuity_gradient(u, v, w, z, dx,
     -------
     y: float array
         value of gradient of mass continuity cost function
-    
-    dudx = np.gradient(u, dx, axis=2)
-    dvdy = np.gradient(v, dy, axis=1)
-    dwdz = np.gradient(w, dz, axis=0)
-    if(anel == 1):
-        rho = np.exp(-z/10000.0)
-        drho_dz = np.gradient(rho, dz, axis=0)
-        anel_term = w/rho*drho_dz
-    else:
-        anel_term = 0
-
-    div2 = dudx + dvdy + dwdz + anel_term
-
-    grad_u = -np.gradient(div2, dx, axis=2)*coeff
-    grad_v = -np.gradient(div2, dy, axis=1)*coeff
-    grad_w = -np.gradient(div2, dz, axis=0)*coeff
-
-    # Impermeability condition
-    grad_w[0, :, :] = 0
-    if(upper_bc is True):
-        grad_w[-1, :, :] = 0
-    y = np.stack([grad_u, grad_v, grad_w], axis=0)
-    return y.flatten()
     """
+    if not jax_on:
+        dudx = np.gradient(u, dx, axis=2)
+        dvdy = np.gradient(v, dy, axis=1)
+        dwdz = np.gradient(w, dz, axis=0)
+        if(anel == 1):
+            rho = np.exp(-z/10000.0)
+            drho_dz = np.gradient(rho, dz, axis=0)
+            anel_term = w/rho*drho_dz
+        else:
+            anel_term = 0
+
+        div2 = dudx + dvdy + dwdz + anel_term
+
+        grad_u = -np.gradient(div2, dx, axis=2)*coeff
+        grad_v = -np.gradient(div2, dy, axis=1)*coeff
+        grad_w = -np.gradient(div2, dz, axis=0)*coeff
+
+        # Impermeability condition
+        grad_w[0, :, :] = 0
+        if(upper_bc is True):
+            grad_w[-1, :, :] = 0
+        y = np.stack([grad_u, grad_v, grad_w], axis=0)
+        return y.flatten()
+        #"""
     # Jax version of the gradient of the cost function
-    primals, fun_vjp = jax.vjp(calculate_mass_continuity, u, v, w, z, dx, dy, dz)
-    formatted_one = get_correct_one(u[0,0,0])
-    grad_u, grad_v, grad_w, _, _, _, _ = fun_vjp(formatted_one)
+    else:
+        primals, fun_vjp = jax.vjp(calculate_mass_continuity, u, v, w, z, dx, dy, dz)
+        formatted_one = get_correct_one(u[0,0,0])
+        grad_u, grad_v, grad_w, _, _, _, _ = fun_vjp(formatted_one)
 
-    # grad_u = fun_vjp(1.0)[0]
-    # grad_v = fun_vjp(1.0)[1]
-    # grad_w = fun_vjp(1.0)[2]
+        # grad_u = fun_vjp(1.0)[0]
+        # grad_v = fun_vjp(1.0)[1]
+        # grad_w = fun_vjp(1.0)[2]
 
-    # Impermeability condition
-    grad_w = jax.ops.index_update(grad_w, jax.ops.index[0, :, :], 0)
-    if (upper_bc is True):
-        grad_w = jax.ops.index_update(grad_w, jax.ops.index[-1, :, :], 0)
-    y = jnp.stack([grad_u, grad_v, grad_w], axis=0)
-    return y.flatten().copy()
+        # Impermeability condition
+        grad_w = jax.ops.index_update(grad_w, jax.ops.index[0, :, :], 0)
+        if (upper_bc is True):
+            grad_w = jax.ops.index_update(grad_w, jax.ops.index[-1, :, :], 0)
+        y = jnp.stack([grad_u, grad_v, grad_w], axis=0)
+        return y.flatten().copy()
 
 
 def calculate_fall_speed(grid, refl_field=None, frz=4500.0):
@@ -924,7 +938,7 @@ def calculate_background_gradient(u, v, w, weights, u_back, v_back, Cb=0.01):
 
 # Using Jax version of function
 def calculate_vertical_vorticity_cost(u, v, w, dx, dy, dz, Ut, Vt,
-                                      coeff=1e-5):
+                                      coeff=1e-5, jax_on=True):
     """
     Calculates the cost function due to deviance from vertical vorticity
     equation. For more information of the vertical vorticity cost function,
@@ -967,48 +981,50 @@ def calculate_vertical_vorticity_cost(u, v, w, dx, dy, dz, Ut, Vt,
     Shapiro, A., C.K. Potvin, and J. Gao, 2009: Use of a Vertical Vorticity
     Equation in Variational Dual-Doppler Wind Analysis. J. Atmos. Oceanic
     Technol., 26, 2089–2106, https://doi.org/10.1175/2009JTECHA1256.1
-    
-    dvdz = np.gradient(v, dz, axis=0)
-    dudz = np.gradient(u, dz, axis=0)
-    dwdz = np.gradient(w, dx, axis=2)
-    dvdx = np.gradient(v, dx, axis=2)
-    dwdy = np.gradient(w, dy, axis=1)
-    dwdx = np.gradient(w, dx, axis=2)
-    dudx = np.gradient(u, dx, axis=2)
-    dvdy = np.gradient(v, dy, axis=2)
-    dudy = np.gradient(u, dy, axis=1)
-    zeta = dvdx - dudy
-    dzeta_dx = np.gradient(zeta, dx, axis=2)
-    dzeta_dy = np.gradient(zeta, dy, axis=1)
-    dzeta_dz = np.gradient(zeta, dz, axis=0)
-    jv_array = ((u - Ut) * dzeta_dx + (v - Vt) * dzeta_dy +
-                w * dzeta_dz + (dvdz * dwdx - dudz * dwdy) +
-                zeta * (dudx + dvdy))
-    return np.sum(coeff*jv_array**2)
     """
-    # Jax version of the cost function
-    dvdz = jnp.gradient(v, dz, axis=0)
-    dudz = jnp.gradient(u, dz, axis=0)
-    dwdz = jnp.gradient(w, dz, axis=0)
-    dvdx = jnp.gradient(v, dx, axis=2)
-    dwdy = jnp.gradient(w, dy, axis=1)
-    dwdx = jnp.gradient(w, dx, axis=2)
-    dudx = jnp.gradient(u, dx, axis=2)
-    dvdy = jnp.gradient(v, dy, axis=1)
-    dudy = jnp.gradient(u, dy, axis=1)
-    zeta = dvdx - dudy
-    dzeta_dx = jnp.gradient(zeta, dx, axis=2)
-    dzeta_dy = jnp.gradient(zeta, dy, axis=1)
-    dzeta_dz = jnp.gradient(zeta, dz, axis=0)
-    jv_array = ((u - Ut) * dzeta_dx + (v - Vt) * dzeta_dy +
-                w * dzeta_dz + (dvdz * dwdx - dudz * dwdy) +
-                zeta * (dudx + dvdy))
-    return jnp.sum(coeff * jv_array ** 2)
+    if not jax_on:
+        dvdz = np.gradient(v, dz, axis=0)
+        dudz = np.gradient(u, dz, axis=0)
+        dwdz = np.gradient(w, dx, axis=2)
+        dvdx = np.gradient(v, dx, axis=2)
+        dwdy = np.gradient(w, dy, axis=1)
+        dwdx = np.gradient(w, dx, axis=2)
+        dudx = np.gradient(u, dx, axis=2)
+        dvdy = np.gradient(v, dy, axis=2)
+        dudy = np.gradient(u, dy, axis=1)
+        zeta = dvdx - dudy
+        dzeta_dx = np.gradient(zeta, dx, axis=2)
+        dzeta_dy = np.gradient(zeta, dy, axis=1)
+        dzeta_dz = np.gradient(zeta, dz, axis=0)
+        jv_array = ((u - Ut) * dzeta_dx + (v - Vt) * dzeta_dy +
+                    w * dzeta_dz + (dvdz * dwdx - dudz * dwdy) +
+                    zeta * (dudx + dvdy))
+        return np.sum(coeff*jv_array**2)
+    #"""
+    else:
+        # Jax version of the cost function
+        dvdz = jnp.gradient(v, dz, axis=0)
+        dudz = jnp.gradient(u, dz, axis=0)
+        dwdz = jnp.gradient(w, dz, axis=0)
+        dvdx = jnp.gradient(v, dx, axis=2)
+        dwdy = jnp.gradient(w, dy, axis=1)
+        dwdx = jnp.gradient(w, dx, axis=2)
+        dudx = jnp.gradient(u, dx, axis=2)
+        dvdy = jnp.gradient(v, dy, axis=1)
+        dudy = jnp.gradient(u, dy, axis=1)
+        zeta = dvdx - dudy
+        dzeta_dx = jnp.gradient(zeta, dx, axis=2)
+        dzeta_dy = jnp.gradient(zeta, dy, axis=1)
+        dzeta_dz = jnp.gradient(zeta, dz, axis=0)
+        jv_array = ((u - Ut) * dzeta_dx + (v - Vt) * dzeta_dy +
+                    w * dzeta_dz + (dvdz * dwdx - dudz * dwdy) +
+                    zeta * (dudx + dvdy))
+        return jnp.sum(coeff * jv_array ** 2)
 
 
 # Using Jax version of function
 def calculate_vertical_vorticity_gradient(u, v, w, dx, dy, dz, Ut, Vt,
-                                          coeff=1e-5):
+                                          coeff=1e-5, jax_on=True):
     """
     Calculates the gradient of the cost function due to deviance from vertical
     vorticity equation. This is done by taking the functional derivative of
@@ -1051,71 +1067,73 @@ def calculate_vertical_vorticity_gradient(u, v, w, dx, dy, dz, Ut, Vt,
     Shapiro, A., C.K. Potvin, and J. Gao, 2009: Use of a Vertical Vorticity
     Equation in Variational Dual-Doppler Wind Analysis. J. Atmos. Oceanic
     Technol., 26, 2089–2106, https://doi.org/10.1175/2009JTECHA1256.1
-    
-
-    # First derivatives
-    dvdz = np.gradient(v, dz, axis=0)
-    dudz = np.gradient(u, dz, axis=0)
-    dwdy = np.gradient(w, dy, axis=1)
-    dudx = np.gradient(u, dx, axis=2)
-    dvdy = np.gradient(v, dy, axis=2)
-    dwdx = np.gradient(w, dx, axis=2)
-    dvdx = np.gradient(v, dx, axis=2)
-    dwdx = np.gradient(w, dx, axis=2)
-    dudz = np.gradient(u, dz, axis=0)
-    dudy = np.gradient(u, dy, axis=1)
-
-    zeta = dvdx - dudy
-    dzeta_dx = np.gradient(zeta, dx, axis=2)
-    dzeta_dy = np.gradient(zeta, dy, axis=1)
-    dzeta_dz = np.gradient(zeta, dz, axis=0)
-
-    # Second deriviatives
-    dwdydz = np.gradient(dwdy, dz, axis=0)
-    dwdxdz = np.gradient(dwdx, dz, axis=0)
-    dudzdy = np.gradient(dudz, dy, axis=1)
-    dvdxdy = np.gradient(dvdx, dy, axis=1)
-    dudx2 = np.gradient(dudx, dx, axis=2)
-    dudxdy = np.gradient(dudx, dy, axis=1)
-    dudxdz = np.gradient(dudx, dz, axis=0)
-    dudy2 = np.gradient(dudx, dy, axis=1)
-
-    dzeta_dt = ((u - Ut)*dzeta_dx + (v - Vt)*dzeta_dy + w*dzeta_dz +
-                (dvdz*dwdx - dudz*dwdy) + zeta*(dudx + dvdy))
-
-    # Now we intialize our gradient value
-    u_grad = np.zeros(u.shape)
-    v_grad = np.zeros(v.shape)
-    w_grad = np.zeros(w.shape)
-
-    # Vorticity Advection
-    u_grad += dzeta_dx + (Ut - u)*dudxdy + (Vt - v)*dudxdy
-    v_grad += dzeta_dy + (Vt - v)*dvdxdy + (Ut - u)*dvdxdy
-    w_grad += dzeta_dz
-
-    # Tilting term
-    u_grad += dwdydz
-    v_grad += dwdxdz
-    w_grad += dudzdy - dudxdz
-
-    # Stretching term
-    u_grad += -dudxdy + dudy2 - dzeta_dx
-    u_grad += -dudx2 + dudxdy - dzeta_dy
-
-    # Multiply by 2*dzeta_dt according to chain rule
-    u_grad = u_grad*2*dzeta_dt*coeff
-    v_grad = v_grad*2*dzeta_dt*coeff
-    w_grad = w_grad*2*dzeta_dt*coeff
-
-    y = np.stack([u_grad, v_grad, w_grad], axis=0)
-    return y.flatten()
     """
-    # Jax version of the gradient cost function
-    primals, fun_vjp = jax.vjp(calculate_vertical_vorticity_cost, u, v, w, dx, dy, dz, Ut, Vt)
-    formatted_one = get_correct_one(u[0,0,0])
-    u_grad, v_grad, w_grad, _, _, _, _, _ = fun_vjp(formatted_one)
-    y = np.stack([u_grad, v_grad, w_grad], axis=0)
-    return y.flatten().copy()
+
+    if not jax_on:
+        # First derivatives
+        dvdz = np.gradient(v, dz, axis=0)
+        dudz = np.gradient(u, dz, axis=0)
+        dwdy = np.gradient(w, dy, axis=1)
+        dudx = np.gradient(u, dx, axis=2)
+        dvdy = np.gradient(v, dy, axis=2)
+        dwdx = np.gradient(w, dx, axis=2)
+        dvdx = np.gradient(v, dx, axis=2)
+        dwdx = np.gradient(w, dx, axis=2)
+        dudz = np.gradient(u, dz, axis=0)
+        dudy = np.gradient(u, dy, axis=1)
+
+        zeta = dvdx - dudy
+        dzeta_dx = np.gradient(zeta, dx, axis=2)
+        dzeta_dy = np.gradient(zeta, dy, axis=1)
+        dzeta_dz = np.gradient(zeta, dz, axis=0)
+
+        # Second deriviatives
+        dwdydz = np.gradient(dwdy, dz, axis=0)
+        dwdxdz = np.gradient(dwdx, dz, axis=0)
+        dudzdy = np.gradient(dudz, dy, axis=1)
+        dvdxdy = np.gradient(dvdx, dy, axis=1)
+        dudx2 = np.gradient(dudx, dx, axis=2)
+        dudxdy = np.gradient(dudx, dy, axis=1)
+        dudxdz = np.gradient(dudx, dz, axis=0)
+        dudy2 = np.gradient(dudx, dy, axis=1)
+
+        dzeta_dt = ((u - Ut)*dzeta_dx + (v - Vt)*dzeta_dy + w*dzeta_dz +
+                    (dvdz*dwdx - dudz*dwdy) + zeta*(dudx + dvdy))
+
+        # Now we intialize our gradient value
+        u_grad = np.zeros(u.shape)
+        v_grad = np.zeros(v.shape)
+        w_grad = np.zeros(w.shape)
+
+        # Vorticity Advection
+        u_grad += dzeta_dx + (Ut - u)*dudxdy + (Vt - v)*dudxdy
+        v_grad += dzeta_dy + (Vt - v)*dvdxdy + (Ut - u)*dvdxdy
+        w_grad += dzeta_dz
+
+        # Tilting term
+        u_grad += dwdydz
+        v_grad += dwdxdz
+        w_grad += dudzdy - dudxdz
+
+        # Stretching term
+        u_grad += -dudxdy + dudy2 - dzeta_dx
+        u_grad += -dudx2 + dudxdy - dzeta_dy
+
+        # Multiply by 2*dzeta_dt according to chain rule
+        u_grad = u_grad*2*dzeta_dt*coeff
+        v_grad = v_grad*2*dzeta_dt*coeff
+        w_grad = w_grad*2*dzeta_dt*coeff
+
+        y = np.stack([u_grad, v_grad, w_grad], axis=0)
+        return y.flatten()
+    #"""
+    else:
+        # Jax version of the gradient cost function
+        primals, fun_vjp = jax.vjp(calculate_vertical_vorticity_cost, u, v, w, dx, dy, dz, Ut, Vt)
+        formatted_one = get_correct_one(u[0,0,0])
+        u_grad, v_grad, w_grad, _, _, _, _, _ = fun_vjp(formatted_one)
+        y = np.stack([u_grad, v_grad, w_grad], axis=0)
+        return y.flatten().copy()
 
 
 def calculate_model_cost(u, v, w, weights, u_model, v_model, w_model,
@@ -1153,7 +1171,7 @@ def calculate_model_cost(u, v, w, weights, u_model, v_model, w_model,
         Value of model cost function
     """
 
-    cost = 0
+    cost = np.array(0.0, dtype=type(coeff))
     for i in range(len(u_model)):
         cost += (coeff * np.sum(np.square(u - u_model[i]) * weights[i] +
                                 np.square(v - v_model[i]) * weights[i]))
@@ -1194,10 +1212,11 @@ def calculate_model_gradient(u, v, w, weights, u_model,
     y: float array
         value of gradient of background cost function
     """
+    data_type = u.dtype
     the_shape = u.shape
-    u_grad = np.zeros(the_shape)
-    v_grad = np.zeros(the_shape)
-    w_grad = np.zeros(the_shape)
+    u_grad = np.zeros(the_shape, dtype=data_type)
+    v_grad = np.zeros(the_shape, dtype=data_type)
+    w_grad = np.zeros(the_shape, dtype=data_type)
     for i in range(len(u_model)):
         u_grad += coeff * 2 * (u - u_model[i]) * weights[i]
         v_grad += coeff * 2 * (v - v_model[i]) * weights[i]

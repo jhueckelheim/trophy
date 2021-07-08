@@ -1,20 +1,19 @@
 import urllib
 import pyart
 import sys
-
-#import pydda
-
-#sys.path.append('/Users/clancy/local_packages/jaxpydda')
-#import jaxpydda as pydda
-
-sys.path.append('/Users/clancy/local_packages')
-sys.path.append('/Users/clancy/local_packages/dynTRpydda')
-import dynTRpydda as pydda
-
-
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import numpy as np
+
+
+# change to location of trophy repo
+repo_path = os.environ['HOME'] + '/repos/'
+sys.path.append(repo_path + 'trophy/python/')
+sys.path.append(repo_path + 'trophy/python/dynTRpydda/')
+
+import dynTRpydda as pydda
+
+
 
 #hrrr_url = ('https://pando-rgw01.chpc.utah.edu/hrrr/prs/20180914/' +
 #            'hrrr.t06z.wrfprsf00.grib2')

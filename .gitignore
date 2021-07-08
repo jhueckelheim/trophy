@@ -4,6 +4,7 @@
 *.pyc
 *__pycache__*
 *.zip
+test.grib2
 
 ## Core latex/pdflatex auxiliary files:
 *.aux

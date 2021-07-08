@@ -16,7 +16,7 @@ sys.path.append('/Users/clancy/repos/trophy/python/')
 sys.path.append('/home/clancy/repos/trophy/python/')
 sys.path.append('/home/rclancy/repos/trophy/python/')
 import FixedPrec
-import DynPrec_edits as DynPrec
+import DynPrec
 import jax
 import pandas as pd
 import copy
@@ -37,7 +37,8 @@ from retrieval.angles import add_azimuth_as_field, add_elevation_as_field
 
 
 # Define multiprecision function
-def obj_fun(z, parameters1, precision):
+#def obj_fun(z, parameters1, precision, jax):
+def obj_fun(z, params, precision, jax_on):
     """
     if prec == 1:
         jax.config.update("jax_enable_x64", False)
@@ -47,8 +48,8 @@ def obj_fun(z, parameters1, precision):
         print("Can't recognize precision", prec)
     """
 
-    fhandle = J_function(z, parameters1, precision)
-    ghandle = grad_J(z, parameters1, precision)
+    fhandle = J_function(z, params, precision, jax_on)
+    ghandle = grad_J(z, params, precision, jax_on)
     return fhandle, ghandle
 
 
@@ -194,11 +195,7 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
                       output_cost_functions=True, roi=1000.0,
                       max_memory=10, use_dynTR=True, store_history=False, gtol=1e-6,
                       precision_dict=None, subproblem_tol=1e-6,
-                      write_folder=None):
-    if store_history:
-        if write_folder is None:
-            write_folder = os.getcwd()
-        print('\n \nWriting to ' + write_folder + '\n \n')
+                      write_folder=None, jax_on=True):
     """
     This function takes in a list of Py-ART Grid objects and derives a
     wind field. Every Py-ART Grid in Grids must have the same grid
@@ -333,6 +330,11 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
         A list of Py-ART grids containing the derived wind fields. These fields
         are displayable by the visualization module.
     """
+    if store_history:
+        if write_folder is None:
+            write_folder = os.getcwd()
+        print('\n \nWriting to ' + write_folder + '\n \n')
+
     global i
     i = 0
 
@@ -553,41 +555,24 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
     parameters.point_list = points
     parameters.print_out = False
 
-    # change precision of parameters so double isn't given an unfair advantage
 
     params = copy.copy(parameters)
-    """
-    mydict = params.__dict__
-    for param_name in dir(params):
-        # for each parameter that isn't "built-in", take a look
-        if '__' not in param_name:
-            curr_param = mydict[param_name]
-            if isinstance(curr_param, (float, np.ndarray, np.float128, np.float64, np.float32)):
-                mydict[param_name] = np.float32(curr_param)
-            if isinstance(curr_param, list):
-                if len(curr_param) > 0:
-                    for ii, entry in enumerate(curr_param):
-                        if isinstance(entry, (np.ndarray, np.float128, np.float64, np.float32)):
-                            mydict[param_name][ii] = np.array(entry, dtype='float32')
-    """
-
-
-    fun = lambda z, prec: obj_fun(z, params, prec)
+    fun = lambda z, prec: obj_fun(z, params, prec, jax_on=jax_on)
 
     t0 = time.time()
     temp = list()
 
-    ####### TESTING TRUST REGION SOLVER WITH JAX FUNCTIONS
+    # are we using trophy?
     if use_dynTR:
-        delta_init = norm(grad_J(winds, parameters, 'double'))
-        #delta_init = max(delta_init, 50)
+        delta_init = norm(grad_J(winds, parameters, 'double', jax_on=False))
+
         print('Using gtol:', gtol, 'Memory:', max_memory)
-        #ret = DynPrec.DynTR_for_pydda changed name of solver here.
+
         ret = DynPrec.DynTR(winds, fun, precision_dict, gtol=gtol, max_iter=max_iterations, verbose=True,
                                       max_memory=max_memory, delta_init=delta_init, store_history=True,
-                                      tr_tol=subproblem_tol, write_folder=write_folder)
-
+                                      tr_tol=subproblem_tol, write_folder=write_folder, sr1_tol=1.e-4)
         t_elapsed = time.time() - t0
+
         # the following allows us to go between stucture type to tuple type returned by fmin_l_bfgs_b
         winds = tuple((ret.x, ret.fun))
         temp = [ret.success, t_elapsed, np.float64(ret.fun), norm(ret.jac), norm(ret.jac, np.inf),
@@ -598,16 +583,18 @@ def get_dd_wind_field(Grids, u_init, v_init, w_init, points=None, vel_name=None,
             temp.append(ret.time_counter[key])
         temp = [temp, temp]  # pain in the butt work-around to save time time trying to write to csv
     else:
-        winds = fmin_l_bfgs_b(J_function, winds, args=(parameters,), m=max_memory, maxiter=max_iterations,
-                              pgtol=gtol, bounds=bounds, fprime=grad_J, iprint=99, factr=1e-32)
+        new_J_function = lambda z, param: J_function(z, param, 'double')
+        new_grad_J = lambda z, param: grad_J(z, param, 'double')
+        winds = fmin_l_bfgs_b(new_J_function, winds, args=(parameters,), m=max_memory, maxiter=max_iterations,
+                              pgtol=gtol, bounds=bounds, fprime=new_grad_J, iprint=99, factr=1e-32)
+        t_elapsed = time.time() - t0
         # last arg ensure doesn't stop until max it or small gradient.
         my_f = winds[1]
         d = winds[2]
-        t_elapsed = time.time() - t0
+
         successful = True if "NORM_OF_PROJECTED" in d['task'] else False
         temp.append([successful, t_elapsed, my_f, norm(d['grad']), norm(d['grad'], np.inf),
                      d['nit'], d['funcalls'], 0, d['task']])
-
 
     print("Done! Time = " + "{:2.1f}".format(time.time() - bt))
 

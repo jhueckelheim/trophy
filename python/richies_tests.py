@@ -3,11 +3,12 @@
 import numpy as np
 import pycutest
 import FixedPrec
-import DynPrec
+import DynPrec_old_version as DynPrec
 import sys, os, time
-from util_func_v2 import pycutest_wrapper
+from util_func import pycutest_wrapper
 
 # add pycutestcache path if you haven't done so elsewhere
+os.environ['PYCUTEST_CACHE']
 sys.path.append('/Users/clancy/Documents/_research/vp_trust/pycutest_cache')
 
 

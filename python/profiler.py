@@ -3,32 +3,29 @@ import numpy as np
 import pandas as pd
 
 eps = 1.0e-6
-max_problem_dim = 101
+max_problem_dim = 100
 file_path = '/Users/clancy/repos/trophy/python/data/'
 sin_path = file_path + 'single_max'+str(max_problem_dim)+ '_eps'+ str(eps) + 'vars.csv'
 dou_path = file_path + 'double_max'+str(max_problem_dim)+ '_eps'+ str(eps) + 'vars.csv'
 dyn_path = file_path + 'dynTR_max'+str(max_problem_dim)+ '_eps'+ str(eps) + 'vars.csv'
 lbf_path = file_path + 'lbfgs_max'+str(max_problem_dim)+ '_eps'+ str(eps) + 'vars.csv'
-
-#sin_path = file_path + 'BFGSforTR_single_max'+str(max_problem_dim)+'vars.csv'
-#dou_path = file_path + 'BFGSforTR_double_max'+str(max_problem_dim)+'vars.csv'
-#dyn_path = file_path + 'BFGSfor_TRdynTR_max'+str(max_problem_dim)+'vars.csv'
-#lbf_path = file_path + 'BFGSforTR_lbfgs_max'+str(max_problem_dim)+'vars.csv'
+tr_path = file_path + 'trncg_max'+str(max_problem_dim)+ '_eps'+ str(eps) + 'vars.csv'
 
 
 sin = pd.read_csv(sin_path)
 dou = pd.read_csv(dou_path)
 dyn = pd.read_csv(dyn_path)
 lbf = pd.read_csv(lbf_path)
+tr = pd.read_csv(tr_path)
 
-dfs = [sin,dou,dyn,lbf]
+dfs = [sin, dou, dyn, lbf, tr]
 for df in dfs:
     df['adjusted_evals'] = (df['fevals'] - df['single_evals']) + 0.5*df['single_evals']
 
 
 title_list = ['Time (eps=' + str(eps)+')', 'Adjusted func. evals.', 'Total func. evals.', 'Iterations']
 
-solver_list = ['Single TR', 'Double TR', 'Dynamic TR', 'L-BFGS']
+solver_list = ['Single TR', 'Double TR', 'Dynamic TR', 'L-BFGS', 'TR-NCG']
 
 profile_for = ['time','adjusted_evals','fevals','nits']
 
@@ -40,11 +37,11 @@ profile_for = ['time','adjusted_evals','fevals','nits']
 #profile_field = 'nfevals'
 
 # detemine successful runs and if they aren't set values to inf
-temp = np.array([sin['success'], dou['success'],dyn['success'], lbf['success']]).T
+temp = np.array([sin['success'], dou['success'],dyn['success'], lbf['success'], tr['success']]).T
 SUCCESS = (temp == 'converged')
 
 for ii, prof in enumerate(profile_for):
-    M = np.array([sin[prof], dou[prof],dyn[prof], lbf[prof]]).T
+    M = np.array([sin[prof], dou[prof],dyn[prof], lbf[prof], tr[prof]]).T
     M = np.double(M)
     M[np.isnan(M)] = np.inf
     M[np.logical_not(SUCCESS)]= np.inf

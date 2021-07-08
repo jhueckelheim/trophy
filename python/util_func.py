@@ -11,95 +11,45 @@
 #   A. S. Berahas, M. Jahani, and M. Takáč, "Quasi-Newton Methods for
 #   Deep Learning: Forget the Past, Just Sample." (2019). Lehigh University.
 #   http://arxiv.org/abs/1901.09997
+
+
+# Edits made by Richie Clancy, summer 2021
 # ==========================================================================
 
 import numpy as np
 import random
 from numpy import linalg as LA
+from numpy.linalg import norm
 import math
+import jax
+import jax.numpy as jnp
+from jax.numpy.linalg import norm as jnorm
+from jax.ops import index, index_add, index_update
 
+dbug = False
 # ==========================================================================
-def CG_Steinhaug_matFree_OLD(epsTR, g , deltak, S,Y,nv):
-    """
-    :param g: gradient
-    :param deltak: TR radius
-    :param S: difference of x's
-    :param Y: differences of gradients
-    :param nv: dimension of search space
-    :return: search direction
-    The following function is used for sloving the trust region subproblem
-    by utilizing "CG_Steinhaug" algorithm discussed in
-    Nocedal, J., & Wright, S. J. (2006). Nonlinear Equations (pp. 270-302). Springer New York.
-    (actually in chapter 7 under trust region newton-CG method pp. 170);
-    moreover, for Hessian-free implementation, we used the compact form of Hessian
-    approximation discussed in Byrd, Richard H., Jorge Nocedal, and Robert B. Schnabel.
-    "Representations of quasi-Newton matrices and their use in limited memory methods."
-    Mathematical Programming 63.1-3 (1994): 129-156
 
-    """
-    zOld = np.zeros((nv,1))
-    rOld = g
-    dOld = -g
-    trsLoop = 1e-12
-    if LA.norm(rOld) < epsTR:
-        return zOld
-    flag = True
-    pk= np.zeros((nv,1))
+"""
+def pycutest_wrapper_old(x,prec, single_func, double_func):
+    if prec == 1:
+        f, g = single_func.obj(x, gradient=True)
+    elif prec == 2:
+        f, g = double_func.obj(x, gradient=True)
+    else:
+        print('Only recognize single or double for pyCUTEst')
+    return f, g
+"""
 
-    # for Hessfree
-    L = np.zeros((Y.shape[1],Y.shape[1]))
-    for ii in range(Y.shape[1]):
-        for jj in range(0,ii):
-            L[ii,jj] = S[:,ii].dot(Y[:,jj])
+def pycutest_wrapper(x, prec, single_func, double_func):
+    if prec == 'single':
+        f, g = single_func.obj(x, gradient=True)
+    elif prec == 'double':
+        f, g = double_func.obj(x, gradient=True)
+    else:
+        print('Only recognize single or double for pyCUTEst')
+    return f, g
 
 
-    tmp = np.sum((S * Y),axis=0)  # gives diagonal of S^T@Y
-
-    D = np.diag(tmp)
-    M = (D + L + L.T)
-    #try:
-    Minv = np.linalg.inv(M)
-    #except:
-        #Minv = np.linalg.inv(M + (1e-6)*np.eye(M.shape[0]))
-    #    print('Warning!!! Matrix indefinite, added diagonal matrix to impose SPD')
-
-    while flag:
-
-        ################  Bk is approximation of Hessian...not it's inverse.
-        tmp1 = np.matmul(Y.T,dOld)
-        tmp2 = np.matmul(Minv,tmp1)
-        Bk_d = np.matmul(Y,tmp2)
-
-        ################
-
-        if dOld.T.dot(Bk_d) < trsLoop:
-            tau = rootFinder(LA.norm(dOld)**2, 2*zOld.T.dot(dOld), (LA.norm(zOld)**2 - deltak**2))
-            pk = zOld + tau*dOld
-            flag = False
-            break
-        alphaj = rOld.T.dot(rOld) / (dOld.T.dot(Bk_d))
-        zNew = zOld +alphaj*dOld
-
-        if LA.norm(zNew) >= deltak:
-            tau = rootFinder(LA.norm(dOld)**2, 2*zOld.T.dot(dOld), (LA.norm(zOld)**2 - deltak**2))
-            pk = zOld + tau*dOld
-            flag = False
-            break
-        rNew = rOld + alphaj*Bk_d
-
-        if LA.norm(rNew) < epsTR:
-            pk = zNew
-            flag = False
-            break
-        betajplus1 = rNew.T.dot(rNew) /(rOld.T.dot(rOld))
-        dNew = -rNew + betajplus1*dOld
-
-        zOld = zNew
-        dOld = dNew
-        rOld = rNew
-    return pk
-
-# ==========================================================================
 def rootFinder(a,b,c):
     """return the root of (a * x^2) + b*x + c =0"""
     r = b**2 - 4*a*c
@@ -123,128 +73,378 @@ def rootFinder(a,b,c):
     else:
         print("No roots")
 
-def L_BFGS_two_loop_recursion_OLD(g_k,S,Y,k,mmr,gamma_k,nv):
-    """
-    The following function returns the serach direction based
-    on LBFGS two loop recursion discussed in
-    Nocedal, J., & Wright, S. J. (2006). Nonlinear Equations (pp. 270-302). Springer New York.
-    """
-    #   idx = min(k,mmr)
-    idx = min(S.shape[1],mmr)
-    rho = np.zeros((idx,1))
 
-    theta = np.zeros((idx,1))
-    q = g_k
-    for i in xrange(idx):
-        rho[idx-i-1] = 1/ S[:,idx-i-1].reshape(nv,1).T.dot(Y[:,idx-i-1].reshape(nv,1))
-        theta[idx-i-1] =(rho[idx-i-1])*(S[:,idx-i-1].reshape(nv,1).T.dot(q))
-        q = q - theta[idx-i-1]*Y[:,idx-i-1].reshape(nv,1)
-
-    r = gamma_k*q
-    for j in xrange(idx):
-        beta = (rho[j])*(Y[:,j].reshape(nv,1).T.dot(r))
-        r = r + S[:,j].reshape(nv,1)*(theta[j] - beta)
-
-    return r
-
-def update_hessian_OLD(H, B0, Y, S, gplus, gprev, s, memory, sr1_tol):
-    y = gplus-gprev
-    pred_grad = y - H@s
-    dot_prod = pred_grad@s
-    if abs(dot_prod) > sr1_tol*LA.norm(pred_grad)*LA.norm(s):
-        if Y.shape[0] > 0:
-            # the dot product is large enough, update shouldn't cause instability
-            if Y.shape[1] >= memory:
-                # all memory used up, delete the oldest (y,s) pair
-                Y = Y[:,1:memory]       # since indexed from zero, start at 1 not 2 and go to memory
-                S = S[:,1:memory]
-
-
-        # add the newest (y,s) pair
-        if Y.shape[0] == 0: #not bool(Y):
-            Y = y
-            S = s
-        else:
-            Y = np.hstack((Y,y.reshape((y.shape[0],1))))
-            S = np.hstack((S,s.reshape((s.shape[0],1))))
-            #Y = np.hstack((Y,y))
-            #S = np.hstack((S,s))
-
-
-        Psi = Y-B0@S
-        SY = S.T@Y
-
-        #if typeof(SY)!=Float64
-        if not isinstance(SY, np.float64):   # check to see if matrix
-        #if SY.shape[0] != 1:   # check to see if matrix
-            D = np.diag(np.diag(SY))
-            L = np.tril(SY) - D
-            U = np.triu(SY) - D
-            try:
-                M = np.linalg.inv( D+L+L.T - (S.T@B0)@S )
-            except:
-                n = length(y)
-                inv(D+L+L.T - (S.T@B0)@S + sr1_tol*np.eye(Y.shape[1]))  #Matrix{Float64}(I,size(Y,2),size(Y,2)))
-        else: # if not a matrix "invert" by dividing
-            M = 1.0/(SY - (S.T@B0)@S)
-            Psi = Psi.reshape((len(Psi),1))
-            M = M.reshape((1,1))
-
-        H = np.real(B0 + (Psi@M)@Psi.T)
-
-    return H, Y, S
-
-def Hessian_times_vec_OLD(Y,S,v):
-    # Letting Hessian remain V to agree with convention elsewhere.
-    L = np.zeros((Y.shape[1],Y.shape[1]))
-    for ii in range(Y.shape[1]):
-        for jj in range(0,ii):
-            L[ii,jj] = S[:,ii].dot(Y[:,jj])
-
-    tmp = np.sum((S * Y),axis=0)  # gives diagonal of S^T@Y
-    D = np.diag(tmp)
-    M = (D + L + L.T)
-    #try:
-    Minv = np.linalg.inv(M)
-    #except:
-    #Minv = np.linalg.inv(M + (1e-6)*np.eye(M.shape[0]))
-    #print('Singular M for Hessian times a vec')
-
-    tmp1 = np.matmul(Y.T,v)
-    tmp2 = np.matmul(Minv,tmp1)
-    B_v = np.matmul(Y,tmp2)
-
-    return B_v
-
-
-
-
-
-
-
-
-
-def updateYS(Y, S, y, s, memory, sr1_tol = 1e-3):
+def updateYS(Y, S, y, s, memory, gamma, sr1_tol=1e-4, verbose=False):
     """
     :param Y: matrix of gradient differences
     :param S: matrix of displacements
-    :param gnew: latest gradient calculation
-    :param gold: previous gradient calculation
-    :param s: most recent step direction
+    :param y: change in gradient
+    :param s: change in x, i.e., most recent step
+    :param memory: memory allocation
+    :param gamma: scaling for identity, often just set to 1
+    :param sr1_tol: helps determine when to update Y and S
+    :param verbose: True or false. When True, will alert user when curvature pair has been rejected
+    :return: updated Y and S
+    """
+    # are we storing any curvature pairs? if not, next step will be in direction of negative gradient
+    if memory > 0:
+
+        pred_grad = y - Hessian_times_vec(Y, S, gamma, s)
+        dot_prod = np.dot(pred_grad, s)
+        # will pair cause instability by being
+        if abs(dot_prod) > sr1_tol*norm(pred_grad)*norm(s):
+
+            # checks to see if there is currently a curvature pair stored (Y and S are empty lists if none stored)
+            if not isinstance(Y, list):
+
+                # have we maxed out storage?
+                if Y.shape[1] >= memory:
+                    # all memory used up, delete the oldest (y,s) pair,since indexed from zero, start at 1 not 2 and go to memory
+                    Y = Y[:, 1:memory]
+                    S = S[:, 1:memory]
+
+            # add newest (y,s) pair as last columns of Y and S respectively
+            if isinstance(Y, list):
+                Y = y.reshape((y.shape[0],1))
+                S = s.reshape((s.shape[0],1))
+            else:
+                Y = np.hstack((Y,y.reshape((y.shape[0],1))))
+                S = np.hstack((S,s.reshape((s.shape[0],1))))
+
+
+            # check to see if we should continue storing older curvature pairs based on positive deifinite criteria.
+            # Used a rule here based on paper Matt provided, but of course, I can't find it now.
+            keep_going = True
+            while keep_going:
+                if S.shape[1] > 0:
+                    Psi = Y - gamma*S
+                    Minv = np.matmul(S.T, Y) - gamma*np.matmul(S.T, S)
+                    tmp = np.min(LA.eig(np.matmul(Psi.T, Psi))[0])
+                    if tmp > 0 and LA.det(Minv) != 0:
+                        keep_going = False
+                    else:
+                        S = S[:, 1::]
+                        Y = Y[:, 1::]
+                else:
+                    keep_going = False
+
+        else:
+            print('Not updating Y and S') if verbose else None
+
+    return Y, S
+
+def Hessian_times_vec(Y, S, gamma, v):
+    """
+    :param Y: matrix of gradient differences
+    :param S: matrix of displacements
+    :param gamma: scaling for identity, often just set to 1
+    :param v: vector to be multiplied
+    :return B_v: low rank Hessian approximate times vector v
+
+    Use form given in
+    Byrd, Richard H., Jorge Nocedal, and Robert B. Schnabel.
+    "Representations of quasi-Newton matrices and their use in limited memory methods."
+    Mathematical Programming 63.1 (1994): 129-156.
+    """
+    nv = len(v)
+    if not isinstance(Y, list):
+        temp1 = np.matmul(S.T, Y)
+        M = np.tril(temp1) + np.triu(temp1.T, 1) - gamma*np.matmul(S.T, S)
+        try:
+            Minv = LA.inv(M)
+        except:
+            # if inverse doesn't exist, use psuedo inverse instead (could probably just use this instead to be safe)
+            Minv = LA.pinv(M)
+
+    else:
+        Minv = np.zeros((1, 1))
+        Y = np.zeros((nv, 1))
+        S = np.zeros((nv, 1))
+
+    # Bk is approximation of Hessian...not it's inverse. This is ``matrix''-vector multiply here
+    G = (Y - gamma*S)
+    tmp1 = np.matmul(G.T, v)
+    tmp2 = np.dot(Minv, tmp1)
+    B_v = np.matmul(G, tmp2) + gamma*v
+    return B_v
+
+
+def CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False, max_it=None):
+    """
+    :param eps: subproblem tolerance
+    :param g: gradient for use in model function
+    :param delta: trust region radius
+    :param S: step/displacement matrix
+    :param Y: gradient difference matrix
+    :param gamma: identity scaling factor
+    :param verbose: print details if set to True
+    :param max_it: maximum number of iterations to take for conjugate gradient
+    :return s, criteria: step vector and stopping criteria that was satisfied
+    """
+    nv = len(g)
+
+    # since CG should converge in at most nv iterations, prevent invinite loop from instability (usually set much lower)
+    if max_it is None:
+        max_it = 3*nv
+
+    # initialize vectors
+    zOld = np.zeros((nv, 1))
+    try:
+        g.shape[1]
+    except:
+        g = g.reshape((nv, 1))
+    rOld = g
+    dOld = -g
+    keep_going = True
+    norm_rOld = norm(rOld)
+
+    # dide we start with the solution? if so, we're already done
+    if norm_rOld < eps:
+        p = zOld
+        return p, "small residual"
+
+    # use compact limited form to generate matrix vector product
+    if not isinstance(Y, list):
+        temp1 = np.matmul(S.T, Y)
+        M = np.tril(temp1) + np.triu(temp1.T, 1) - gamma*np.matmul(S.T, S)
+        try:
+            Minv = LA.inv(M)
+        except:
+            Minv = LA.pinv(M)
+    else:
+        Minv = np.zeros((1, 1))
+        Y = np.zeros((nv, 1))
+        S = np.zeros((nv, 1))
+
+    # set G and G_T so we don't need to keep transposing for big matrices.
+    j = 0
+    G = Y-gamma*S
+    G_T = np.array(G.T, order='C')
+
+    while keep_going:
+        # calculate ``Hessian''-vector product
+        temp1 = np.matmul(G_T, dOld)
+        temp2 = np.matmul(Minv, temp1)
+        B_dOld = np.matmul(G, temp2) + gamma*dOld
+        dBd = np.matmul(dOld.T, B_dOld)
+
+        # does direction have negative curvature?
+        if dBd <= 0:
+            # find tau that gives minimizer
+            tau = rootFinder(norm(dOld)**2, 2*np.dot(zOld.T, dOld), (norm(zOld)**2 - delta**2))
+            p = zOld + tau*dOld
+
+            if dBd == 0:
+                print("The matrix is indefinite") if verbose else None
+            return p, "neg. curve",
+
+        alphaj = norm_rOld**2 / dBd
+        zNew = zOld + alphaj*dOld
+
+        # stop if we exceed trust region radius (we know the norm of the step will continue increasing beyond radius)
+        # It's work noting that this should be a descent direction so shouldn't harm us by stopping early.
+        if norm(zNew) >= delta:
+            tau = rootFinder(norm(dOld)**2, 2*np.dot(zOld.T, dOld), (norm(zOld)**2 - delta**2))
+            p = zOld + tau*dOld
+            return p, "exceed TR"
+
+        rNew = rOld + alphaj*B_dOld
+        norm_rNew = norm(rNew)
+
+        # have we converged or taken to many iterations
+        if norm_rNew <= eps or j > max_it:
+            p = zNew
+            if norm_rNew > eps:
+                print('CG should have converged by now') if verbose else None
+                return p, "Too many CG iterations"
+            else:
+                return p, "Success in TR"
+
+        betaNew = norm_rNew**2/norm_rOld**2
+        dNew = -rNew + betaNew*dOld
+
+        dOld = dNew
+        rOld = rNew
+        zOld = zNew
+        norm_rOld = norm_rNew
+        j += 1
+
+
+
+
+
+class structtype():
+    # pulled from https://stackoverflow.com/questions/11637045/complex-matlab-like-data-structure-in-python-numpy-scipy
+    # this just allows us to return structure type return from solver like scipy.optimize (should probably figure out
+    # how to do this using exact same class type aa scipy
+    def __init__(self, **kwargs):
+        self.Set(**kwargs)
+    def Set(self, **kwargs):
+        self.__dict__.update(kwargs)
+    def SetAttr(self, lab, val):
+        self.__dict__[lab] = val
+    def ListVariables(self):
+        names = dir(self)
+        for name in names:
+            # Print the item if it doesn't start with '__'
+            if '__' not in name and 'Set' not in name and 'SetAttr' not in name and 'ListVariables' not in name:
+                myvalue = self.__dict__[name]
+                print(name, ':', myvalue)
+
+
+
+
+# this is old code, not as well tested using BFGS updates instead of SR-1
+'''
+def BFGS_hessian_times_vec(Y,S,gamma,v,verbose=False):
+    # Letting Hessian remain V to agree with convention elsewhere.
+    nv = len(v)
+    if np.sum(Y) != 0:
+        #gamma = (Y[:,-1].T@Y[:,-1]) / (S[:,-1].T@Y[:,-1])
+        L = np.zeros((Y.shape[1],Y.shape[1]))
+        temp = np.zeros(L.shape[0])
+        for ii in range(Y.shape[1]):
+            temp[ii] = S[:,ii].T@Y[:,ii]
+            for jj in range(0,ii):
+                L[ii,jj] = S[:,ii].T@Y[:,jj]
+
+        A = np.hstack((gamma*S, Y))
+        topmat = np.hstack((gamma*S.T@S, L))
+        botmat = np.hstack((L.T, -np.diag(temp)))
+
+        M = np.vstack( (topmat,botmat) )
+        try:
+            Minv = LA.inv(M)
+        except:
+            if verbose: print('Matrix is singular')
+            Minv = LA.inv(M + 1e-6*np.eye(M.shape[0]))
+            time.sleep(10)
+    else:
+        #gamma = 1
+        Minv = np.zeros((1,1))
+        A = np.zeros((nv,1))
+
+    ################  Bk is approximation of Hessian...not it's inverse.
+    tmp1 = A.T@v
+    tmp2 = Minv@tmp1
+    B_v = gamma*v - A@tmp2
+    return B_v
+
+
+def BFGS_CG_Steinhaug_matFree(eps, g, delta, S, Y, gamma, verbose=False):
+    nv = len(g)
+    zOld = np.zeros((nv,1))
+    rOld = g
+    dOld = -g
+    keep_going = True
+
+    if norm(rOld) < eps:
+        p = zOld
+        return p, "small residual"
+
+    # use compact limited form to generate
+    if np.sum(Y) != 0 or np.sum(S) != 0:
+        #gamma = (Y[:,-1].T@Y[:,-1]) / (S[:,-1].T@Y[:,-1])
+        L = np.zeros((Y.shape[1],Y.shape[1]))
+        temp = np.zeros(L.shape[0])
+        for ii in range(Y.shape[1]):
+            temp[ii] = S[:,ii].T@Y[:,ii]
+            for jj in range(0,ii):
+                L[ii,jj] = S[:,ii].T@Y[:,jj]
+
+        A = np.hstack((gamma*S, Y))
+        topmat = np.hstack((gamma*S.T@S, L))
+        botmat = np.hstack((L.T, -np.diag(temp)))
+
+        M = np.vstack( (topmat,botmat) )
+
+        if abs(LA.det(M)) > 1.e-16:
+            Minv = LA.inv(M)
+        else:
+            Minv = LA.inv(M + 1e-6*np.eye(M.shape[0]))
+    else:
+        Minv = np.zeros((1,1))
+        A = np.zeros((nv,1))
+
+    j = 0
+
+    if dbug:
+        Bk = gamma*np.eye(nv) - A@Minv@A.T
+        #Bk = (Bk + Bk.T)/2.
+        lam = np.min(LA.eig(Bk)[0])
+        if lam > 0:
+            #print('Matrix is positive definite with lambda_min=', lam)
+            pass
+        elif lam == 0:
+            pass
+            #print('Matrix is singular')
+        else:
+            print('Matrix is indefinite with e.vals', LA.eig(Bk)[0])
+            print(gamma)
+
+    while keep_going:
+        tmp1 = A.T@dOld
+        try:
+            tmp2 = Minv@tmp1
+        except:
+            print('Check problem out')
+
+        B_dOld = gamma*dOld - A@tmp2
+
+        dBd = dOld.T@B_dOld
+        # does direction have negative curvature?
+        if dBd <= 0:
+            # find tau that gives minimizer
+            tau = rootFinder(norm(dOld)**2, 2*zOld.T@dOld, (norm(zOld)**2 - delta**2))
+            p = zOld + tau*dOld
+            if dBd == 0:
+                if verbose: print("The matrix is indefinite")
+            return p, "neg. curve",
+
+        alphaj = norm(rOld)**2 / dBd
+        zNew = zOld + alphaj*dOld
+        if norm(zNew) >= delta:
+            tau = rootFinder(norm(dOld)**2, 2*zOld.T@dOld, (norm(zOld)**2 - delta**2))
+            p = zOld + tau*dOld
+            return p, "exceed TR"
+
+        rNew = rOld + alphaj*B_dOld
+        if norm(rNew) <= eps or j > 5*nv:
+            p = zNew
+            if norm(rNew) > eps:
+                if verbose: print('CG should have converged by now')
+                return p, "Too many iterations"
+            else:
+                return p, "Success in TR"
+
+        betaNew = norm(rNew)**2/norm(rOld)**2
+        dNew = -rNew + betaNew*dOld
+
+        dOld = dNew
+        rOld = rNew
+        zOld = zNew
+        j += 1
+
+
+def BFGS_updateYS(Y, S, y, s, memory, gamma, sr1_tol = 1e-4, verbose=False):
+    """
+    :param Y: matrix of gradient differences
+    :param S: matrix of displacements
+    :param y: change in gradient
+    :param s: change in x
     :param memory: memory allocation
     :param sr1_tol: helps determine when to update Y and S
     :return: updated Y and S
     """
-    pred_grad = y - Hessian_times_vec(Y,S,s)
+    pred_grad = y - BFGS_hessian_times_vec(Y,S,gamma,s)
     dot_prod = np.dot(pred_grad,s)
-    if abs(dot_prod) > sr1_tol*LA.norm(pred_grad)*LA.norm(s):
+    if abs(dot_prod) > sr1_tol*norm(pred_grad)*norm(s) and np.abs(np.dot(s,y)) > 1e-16:
         if np.sum(Y) != 0:
             # the dot product is large enough, update shouldn't cause instability
             if Y.shape[1] >= memory:
                 # all memory used up, delete the oldest (y,s) pair
                 Y = Y[:,1:memory]       # since indexed from zero, start at 1 not 2 and go to memory
                 S = S[:,1:memory]
-
 
         # add the newest (y,s) pair
         if np.sum(Y) == 0:
@@ -254,133 +454,8 @@ def updateYS(Y, S, y, s, memory, sr1_tol = 1e-3):
             Y = np.hstack((Y,y.reshape((y.shape[0],1))))
             S = np.hstack((S,s.reshape((s.shape[0],1))))
     else:
-        print('Not updating Y and S')
+        if verbose:
+            print('Not updating Y and S')
 
     return Y, S
-
-
-
-def Hessian_times_vec(Y,S,v):
-    # Letting Hessian remain V to agree with convention elsewhere.
-    nv = len(v)
-
-    if np.sum(Y) != 0:
-        gamma = (Y[:,-1]@Y[:,-1]) / (S[:,-1]@Y[:,-1])
-        L = np.zeros((Y.shape[1],Y.shape[1]))
-        for ii in range(Y.shape[1]):
-            for jj in range(0,ii):
-                L[ii,jj] = S[:,ii].dot(Y[:,jj])
-
-        tmp = np.sum((S * Y),axis=0)  # gives diagonal of S^T@Y
-        D = np.diag(tmp)
-        M = D + L + L.T - gamma*(S.T@S)
-        Minv = np.linalg.inv(M)
-    else:
-        gamma = 1
-        Minv = np.zeros((1,1))
-        Y = np.zeros((len(v),1))
-        S = np.zeros((len(v),1))
-
-    Y_minus_BS = Y - gamma*S
-    ################  Bk is approximation of Hessian...not it's inverse.
-    tmp1 = np.matmul( Y_minus_BS.T,v)
-    tmp2 = np.matmul(Minv,tmp1)
-    B_v = np.matmul(Y_minus_BS,tmp2) + gamma*v
-
-    return B_v
-
-
-
-def CG_Steinhaug_matFree(epsTR, g , deltak, S, Y):
-    """
-    :param epsTR: accuracy for which to solve TR subproblem
-    :param g: gradient
-    :param deltak: TR radius
-    :param S: difference of x's
-    :param Y: differences of gradients
-    :param nv: dimension of search space
-    :return: search direction
-    The following function is used for sloving the trust region subproblem
-    by utilizing "CG_Steinhaug" algorithm discussed in
-    Nocedal, J., & Wright, S. J. (2006). Nonlinear Equations (pp. 270-302). Springer New York.
-    (actually in chapter 7 under trust region newton-CG method pp. 170);
-    Richie Clancy edits
-
-    """
-    nv = len(g)
-    zOld = np.zeros((nv,1))
-    rOld = g
-    dOld = -g
-    trsLoop = 1e-12
-    if LA.norm(rOld) < epsTR:
-        # if gradient is already small, we're done.
-        return zOld
-    flag = True
-    pk= np.zeros((nv,1))
-
-
-    # Use B0 = gamma_k*I where gamma_k = (y_{k-1}^T y_{k-1}) / (s_{k-1}^T y_{k-1})
-    if np.sum(Y) > 0:
-        # for gamma by taking dot product from last columns of Y and S
-        gamma = (Y[:,-1]@Y[:,-1]) / (S[:,-1]@Y[:,-1])
-        # for Hessfree
-        L = np.zeros((Y.shape[1],Y.shape[1]))
-        for ii in range(Y.shape[1]):
-            for jj in range(0,ii):
-                L[ii,jj] = S[:,ii].dot(Y[:,jj])
-
-
-        tmp = np.sum((S * Y),axis=0)  # gives diagonal of S^T@Y
-        D = np.diag(tmp)
-        M = D + L + L.T - gamma*(S.T@S)
-        #try:
-        Minv = np.linalg.inv(M)
-        #except:
-        #Minv = np.linalg.inv(M + (1e-6)*np.eye(M.shape[0]))
-        #    print('Warning!!! Matrix indefinite, added diagonal matrix to impose SPD')
-    else:
-        gamma = 1
-        Minv = np.zeros((1,1))
-        Y = np.zeros((nv,1))
-        S = np.zeros((nv,1))
-
-    Y_minus_B0S = Y-gamma*S
-    while flag:
-        ################  Bk is approximation of Hessian...not it's inverse.
-        tmp1 = np.matmul( Y_minus_B0S.T,dOld)
-        tmp2 = np.matmul(Minv,tmp1)
-        Bk_d = np.matmul(Y_minus_B0S,tmp2) + gamma*dOld
-
-        ################
-
-        if dOld.T.dot(Bk_d) < trsLoop:
-            tau = rootFinder(LA.norm(dOld)**2, 2*zOld.T.dot(dOld), (LA.norm(zOld)**2 - deltak**2))
-            pk = zOld + tau*dOld
-            flag = False
-            break
-        alphaj = rOld.T.dot(rOld) / (dOld.T.dot(Bk_d))
-        zNew = zOld +alphaj*dOld
-
-        if LA.norm(zNew) >= deltak:
-            tau = rootFinder(LA.norm(dOld)**2, 2*zOld.T.dot(dOld), (LA.norm(zOld)**2 - deltak**2))
-            pk = zOld + tau*dOld
-            flag = False
-            break
-        rNew = rOld + alphaj*Bk_d
-
-        if LA.norm(rNew) < epsTR:
-            pk = zNew
-            flag = False
-            break
-        betajplus1 = rNew.T.dot(rNew) /(rOld.T.dot(rOld))
-        dNew = -rNew + betajplus1*dOld
-
-        zOld = zNew
-        dOld = dNew
-        rOld = rNew
-    return pk
-
-
-
-
-
+'''
