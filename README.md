@@ -40,7 +40,7 @@ Once all the CUTEst problems have been built, we are able to benchmark performan
 To test the problems and generate output, files are generate in the data folder (or where ever specified within `profiler.py` under `use_dir` variable. By running `profiler.py` and setting the appropriate Python path within the scipt to call on appropriate location of files, Python plots with performance metrics are generated.  We have a difficult time beating L-BFGS and the built in scipy trust region solver that uses Newton-CG with a full Hessian. There are a few things worth considering: first, scipy is highly optimized, our method, not so much and second, the built in trust region method is using a full Hessian. Since we generally won't have access to a full Hessian and if we do, won't be able to even form the matrix, the comparison is skewed. Nonetheless, we present the results here. 
 
 
-![image](/Users/clancy/repos/trophy/python/figures/profiler_with_tr.png "Profile of different algorithms")
+![image](python/figures/profiler_with_tr.png "Profile of different algorithms")
 
 
 # PyDDA as a real world problem 
